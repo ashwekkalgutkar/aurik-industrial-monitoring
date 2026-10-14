@@ -13,17 +13,17 @@
     },
     {
       "key": "ingestKey",
-      "value": "aurik-ingest-secret-key-prod-01",
+      "value": "aurik-ingest-secret-key-prod-001",
       "type": "string"
     },
     {
       "key": "readKey",
-      "value": "aurik-read-secret-key-prod-03",
+      "value": "aurik-read-secret-key-prod-002",
       "type": "string"
     },
     {
       "key": "adminKey",
-      "value": "aurik-admin-secret-key-prod-02",
+      "value": "aurik-admin-secret-key-prod-003",
       "type": "string"
     }
   ],
