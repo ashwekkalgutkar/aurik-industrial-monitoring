@@ -47,11 +47,23 @@
 
 ---
 
-### Decision 5: Materialized Operational View with Optimistic Versioning
-* **Chosen Approach**: Persist derived machine status in `machine_state_view` with an indexed `(plant_id, line_id, derived_status, attention_level)` composite index and a monotonic `state_version` integer.
+### Decision 6: Multi-Stage Non-Root Containerization & One-Shot Advisory Migrations
+* **Chosen Approach**:
+  - Multi-stage Docker build isolating build dependencies (`uv`, gcc/build tools) to an intermediate builder stage, producing a slim runtime image (`python:3.12-slim`) running as an unprivileged non-root user (`appuser:10001`).
+  - Container entrypoints use exec-form CMD to propagate UNIX signals (`SIGTERM`) directly to Uvicorn and worker processes for graceful shutdown.
+  - Database schema migrations are isolated to a dedicated one-shot `migrate` service. In entrypoints where automated migration is required, execution is guarded by PostgreSQL session-level advisory locks (`pg_advisory_xact_lock(0x415552494b)`) to eliminate race conditions between concurrent API and worker containers.
 * **Why**:
-  - High-traffic plant dashboard queries (`GET /v1/machines/status`, `/v1/plants/{id}/summary`) run in single-digit milliseconds without scanning thousands of historical normalized signals.
-  - Status recomputations use optimistic concurrency checks to ensure concurrent workers never overwrite newer state computations with older ones.
+  - Eliminates container privilege escalation vulnerabilities and prevents compiler or test fixture leakage into production runtime containers.
+  - Running migrations concurrently across multiple scaling worker replicas causes index locking deadlocks and DDL transaction race failures; advisory-locked one-shot execution guarantees atomic, sequential schema application.
+
+---
+
+### Decision 7: Production Security Posture & Fail-Closed Guardrails
+* **Chosen Approach**:
+  - In `APP_ENV=production`, the application strictly validates all API keys on boot, refusing to start if any key is empty, matching example defaults, or shorter than 24 characters.
+  - Interactive API documentation (`/docs`, `/redoc`, `/openapi.json`) is disabled by default in production (`ENABLE_DOCS=false`), preventing schema introspection in untrusted environments.
+  - Database connections enforce explicit connection timeouts (`5s`) and statement timeouts (`30s`), preventing slow query starvation or denial-of-service vulnerabilities.
+  - CORS is disabled by default for this backend-to-backend ingestion microservice, avoiding arbitrary browser cross-origin invocation.
 
 ---
 
@@ -74,3 +86,4 @@ If deploying to a multi-region production cluster at scale:
 1. **Queue Horizontal Scaling**: Partition the `jobs` table by hash of `machine_id` across worker pools to eliminate lock contention on high-volume assets.
 2. **Signal Archival & Partitioning**: Range-partition `normalized_signals` and `raw_records` by monthly `event_time` intervals, dropping or archiving older partitions to cold storage (e.g. S3 Parquet via DuckDB).
 3. **Change Data Capture (CDC)**: Stream `machine_state_view` upserts via PostgreSQL logical replication (WAL) or Debezium directly to WebSocket notification hubs for zero-latency operator screen refreshes.
+4. **Secret Management Integration**: Replace static environment variable secrets with runtime secret retrieval via AWS Secrets Manager or HashiCorp Vault.

@@ -38,7 +38,8 @@ graph TD
 
     subgraph Serving Layer
         ReadAPI[Operational Read API]
-        Prom[Prometheus Metrics]
+        AdminMetrics[Admin Metrics: GET /v1/admin/metrics]
+        Prom[Prometheus Metrics: GET /metrics]
     end
 
     PF -->|HTTP POST| Auth
@@ -264,3 +265,32 @@ erDiagram
         timestamp locked_until
     }
 ```
+
+---
+
+## 6. Containerization, Hardening & Security Architecture
+
+### 1. Multi-Stage Non-Root Docker Architecture
+- **Builder Stage**: Installs `uv` and compiles runtime wheel packages into a virtual environment (`/opt/venv`).
+- **Runtime Stage**: Based on `python:3.12-slim`. Contains **no compilers**, no dev tools (no pytest, ruff, mypy), and no tests directory.
+- **Unprivileged User**: Runs as `appuser:10001` with explicit ownership of application directories.
+- **Signals & Shutdown**: Container uses exec-form `CMD ["uvicorn", "app.main:app", ...]` ensuring `SIGTERM` signals directly reach the process for graceful drain.
+- **Image Size**: Reduced from ~1.2GB (full dev/build environment) to ~175MB runtime container footprint.
+
+### 2. Database Migration Coordination & Startup Races
+To prevent race conditions when multiple API or worker replicas boot simultaneously:
+- Schema migrations run through a dedicated one-shot `migrate` service in `docker-compose.yml`.
+- Both `api` and `worker` services declare `depends_on: { migrate: { condition: service_completed_successfully } }`.
+- In entrypoints or environments where auto-migration is triggered, migrations acquire a PostgreSQL transaction-level advisory lock (`SELECT pg_advisory_xact_lock(0x415552494b)`) so competing processes wait until schema changes commit.
+
+### 3. Dual-Surface Metrics Model
+- **`/v1/admin/metrics` (Operational JSON)**: Protected by `API_KEY_ADMIN`. Returns structured telemetry for queue depth by status (`PENDING`, `RUNNING`, `FAILED_RETRYABLE`, `DEAD`, `SUCCEEDED`), vendor rejection breakdown, and unmapped/unknown event occurrences.
+- **`/metrics` (Prometheus Scrape Endpoint)**: Standard Prometheus text format exposition (`text/plain; version=0.0.4`) exposing internal application counters, HTTP latencies, and queue gauges for internal cluster scrapers.
+
+### 4. Security Hardening Policies
+- **Production Mode Key Enforcing**: When `APP_ENV=production`, the configuration layer strictly rejects default/example keys, empty strings, and keys under 24 characters with explicit error messages without leaking secret values.
+- **Docs Toggling**: Interactive API documentation (`/docs`, `/redoc`, `/openapi.json`) is enabled by default in `development` but disabled by default in `production` unless explicitly overridden via `ENABLE_DOCS=true`.
+- **Database Timeouts**: Default connect timeout is set to 5 seconds and statement timeout is set to 30,000ms (`30s`), preventing unbounded query execution from exhausting connection pools.
+- **Request Body Limit**: Strict 10MB maximum payload size enforced at the ASGI layer to prevent denial-of-service via large ingestion payloads.
+- **CORS**: Disabled by default for internal microservice communication; configurable via `CORS_ALLOW_ORIGINS`.
+
