@@ -6,7 +6,9 @@ import sys
 import time
 from types import FrameType
 
-from app.core.clock import get_clock
+from sqlalchemy.orm import Session
+
+from app.core.clock import Clock, get_clock
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.db.base import SessionLocal
@@ -58,7 +60,33 @@ def run_worker() -> None:
 
     logger.info("Aurik background worker cleanly stopped.")
 
+def drain_queue(
+    session: Session,
+    clock: Clock,
+    max_jobs: int = 1000,
+) -> int:
+    """Synchronously process all pending queue jobs until the queue is exhausted.
+
+    Useful for seeding, test suites, and deterministic batch processing.
+    Returns the total number of jobs executed.
+    """
+    settings = get_settings()
+    queue = PostgresJobQueue(session, clock)
+    count = 0
+    while count < max_jobs:
+        processed = execute_job_step(
+            queue=queue,
+            session=session,
+            handlers=DEFAULT_JOB_HANDLERS,
+            lease_seconds=settings.JOB_LEASE_SECONDS,
+        )
+        if not processed:
+            break
+        count += 1
+    return count
+
 
 if __name__ == "__main__":
     run_worker()
     sys.exit(0)
+
