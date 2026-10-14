@@ -1,0 +1,14 @@
+# Aurik Industrial Equipment Monitoring Backend
+# Pinned Development & Test Dependencies
+-r requirements.txt
+httpcore==1.0.9
+httpx==0.28.1
+iniconfig==2.3.1
+mypy==2.4.0
+mypy_extensions==1.1.0
+pathspec==1.1.1
+pluggy==1.6.0
+Pygments==2.21.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
+ruff==0.17.0
