@@ -33,6 +33,7 @@ services:
       API_KEY_INGEST: ${API_KEY_INGEST:-aurik-ingest-secret-key-prod-001}
       API_KEY_READ: ${API_KEY_READ:-aurik-read-secret-key-prod-002}
       API_KEY_ADMIN: ${API_KEY_ADMIN:-aurik-admin-secret-key-prod-003}
+      CLOCK_ANCHOR: ${CLOCK_ANCHOR:-}
     command: ["alembic", "upgrade", "head"]
     restart: "no"
     healthcheck:
@@ -56,6 +57,7 @@ services:
       API_KEY_INGEST: ${API_KEY_INGEST:-aurik-ingest-secret-key-prod-001}
       API_KEY_READ: ${API_KEY_READ:-aurik-read-secret-key-prod-002}
       API_KEY_ADMIN: ${API_KEY_ADMIN:-aurik-admin-secret-key-prod-003}
+      CLOCK_ANCHOR: ${CLOCK_ANCHOR:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       MAX_PAYLOAD_BYTES: ${MAX_PAYLOAD_BYTES:-5242880}
       ALERT_TTL_MINUTES: ${ALERT_TTL_MINUTES:-120}
@@ -95,6 +97,7 @@ services:
       API_KEY_INGEST: ${API_KEY_INGEST:-aurik-ingest-secret-key-prod-001}
       API_KEY_READ: ${API_KEY_READ:-aurik-read-secret-key-prod-002}
       API_KEY_ADMIN: ${API_KEY_ADMIN:-aurik-admin-secret-key-prod-003}
+      CLOCK_ANCHOR: ${CLOCK_ANCHOR:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-60}
       JOB_MAX_ATTEMPTS: ${JOB_MAX_ATTEMPTS:-3}
@@ -136,6 +139,7 @@ services:
       API_KEY_INGEST: ${API_KEY_INGEST:-aurik-ingest-secret-key-prod-001}
       API_KEY_READ: ${API_KEY_READ:-aurik-read-secret-key-prod-002}
       API_KEY_ADMIN: ${API_KEY_ADMIN:-aurik-admin-secret-key-prod-003}
+      CLOCK_ANCHOR: ${CLOCK_ANCHOR:-}
     command: ["python", "-m", "app.cli", "seed"]
     restart: "no"
     healthcheck:

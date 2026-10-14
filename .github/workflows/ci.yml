@@ -126,6 +126,7 @@ jobs:
           sed -i 's/CHANGE_ME_INGEST_KEY_PROD_MIN_24_CHARS/aurik-ingest-secret-key-prod-001/g' .env
           sed -i 's/CHANGE_ME_READ_KEY_PROD_MIN_24_CHARS/aurik-read-secret-key-prod-002/g' .env
           sed -i 's/CHANGE_ME_ADMIN_KEY_PROD_MIN_24_CHARS/aurik-admin-secret-key-prod-003/g' .env
+          echo "CLOCK_ANCHOR=2026-04-18T09:00:00Z" >> .env
 
       - name: Start Services with Docker Compose
         run: docker compose up -d --build --wait
@@ -141,10 +142,10 @@ jobs:
           echo "Health and Readiness endpoints verified."
 
       - name: Seed Database
-        run: docker compose exec -T api python -m app.cli seed
+        run: docker compose exec -T -e CLOCK_ANCHOR=2026-04-18T09:00:00Z api python -m app.cli seed --clean
 
       - name: Run Independent Anchor Verification
-        run: docker compose exec -T api python scripts/verify_anchors.py
+        run: docker compose exec -T -e CLOCK_ANCHOR=2026-04-18T09:00:00Z api python scripts/verify_anchors.py
 
       - name: Tear Down Docker Compose
         if: always()

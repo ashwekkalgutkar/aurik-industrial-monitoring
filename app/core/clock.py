@@ -5,6 +5,7 @@ All timestamps (received_at, job leases, retry backoff, freshness evaluation,
 and as_of defaults) MUST be obtained through this interface.
 """
 
+import os
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -21,9 +22,15 @@ class Clock(ABC):
 
 
 class SystemClock(Clock):
-    """Standard production clock returning real system UTC time."""
+    """Standard production clock returning real system UTC time (or anchored time if CLOCK_ANCHOR is set)."""
 
     def now(self) -> datetime:
+        anchor = os.environ.get("CLOCK_ANCHOR")
+        if anchor:
+            dt = datetime.fromisoformat(anchor.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            return dt
         return datetime.now(UTC)
 
 
