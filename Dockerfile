@@ -38,7 +38,7 @@ FROM python:3.12-slim AS runner
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    APP_ENV=production
+    APP_ENV=development
 
 WORKDIR /app
 

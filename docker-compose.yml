@@ -29,6 +29,7 @@ services:
     environment:
       DATABASE_URL: ${COMPOSE_DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@postgres:5432/${POSTGRES_DB:-aurik_monitoring}}
       ENVIRONMENT: ${ENVIRONMENT:-development}
+      APP_ENV: ${APP_ENV:-development}
       API_KEY_INGEST: ${API_KEY_INGEST:-aurik-ingest-secret-key-prod-001}
       API_KEY_READ: ${API_KEY_READ:-aurik-read-secret-key-prod-002}
       API_KEY_ADMIN: ${API_KEY_ADMIN:-aurik-admin-secret-key-prod-003}
@@ -49,6 +50,7 @@ services:
     environment:
       DATABASE_URL: ${COMPOSE_DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@postgres:5432/${POSTGRES_DB:-aurik_monitoring}}
       ENVIRONMENT: ${ENVIRONMENT:-development}
+      APP_ENV: ${APP_ENV:-development}
       API_KEY_INGEST: ${API_KEY_INGEST:-aurik-ingest-secret-key-prod-001}
       API_KEY_READ: ${API_KEY_READ:-aurik-read-secret-key-prod-002}
       API_KEY_ADMIN: ${API_KEY_ADMIN:-aurik-admin-secret-key-prod-003}
@@ -87,6 +89,7 @@ services:
     environment:
       DATABASE_URL: ${COMPOSE_DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@postgres:5432/${POSTGRES_DB:-aurik_monitoring}}
       ENVIRONMENT: ${ENVIRONMENT:-development}
+      APP_ENV: ${APP_ENV:-development}
       API_KEY_INGEST: ${API_KEY_INGEST:-aurik-ingest-secret-key-prod-001}
       API_KEY_READ: ${API_KEY_READ:-aurik-read-secret-key-prod-002}
       API_KEY_ADMIN: ${API_KEY_ADMIN:-aurik-admin-secret-key-prod-003}
@@ -121,6 +124,7 @@ services:
     environment:
       DATABASE_URL: ${COMPOSE_DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@postgres:5432/${POSTGRES_DB:-aurik_monitoring}}
       ENVIRONMENT: ${ENVIRONMENT:-development}
+      APP_ENV: ${APP_ENV:-development}
       API_KEY_INGEST: ${API_KEY_INGEST:-aurik-ingest-secret-key-prod-001}
       API_KEY_READ: ${API_KEY_READ:-aurik-read-secret-key-prod-002}
       API_KEY_ADMIN: ${API_KEY_ADMIN:-aurik-admin-secret-key-prod-003}
