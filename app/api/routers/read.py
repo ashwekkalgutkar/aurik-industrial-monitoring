@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.schemas.operational import (
     BatchDetailRecordItem,
+    ContributingReasonExplanation,
     GlobalSummaryResponse,
     IngestionBatchDetailResponse,
     LineAttentionSummary,
@@ -18,6 +19,7 @@ from app.api.schemas.operational import (
     PaginatedMachineStatusResponse,
     PlantSummaryResponse,
     RawRecordDetailResponse,
+    SourceEventRef,
 )
 from app.core.clock import Clock, get_clock
 from app.core.config import get_settings
@@ -96,6 +98,7 @@ def readyz(session: SessionDep) -> Response:
 def _build_machine_status_response(
     machine: Machine,
     view: MachineStateView,
+    as_of: datetime | None = None,
 ) -> MachineStatusResponse:
     """Helper to merge machine metadata and derived state view into response schema."""
     return MachineStatusResponse(
@@ -109,12 +112,19 @@ def _build_machine_status_response(
         attention_level=view.attention_level,
         needs_attention=view.needs_attention,
         reason_codes=view.reason_codes,
-        explanation=view.explanation,
+        explanation=[
+            e if isinstance(e, ContributingReasonExplanation) else ContributingReasonExplanation(**e)
+            for e in (view.explanation or [])
+        ],
         latest_relevant_event_time=view.latest_relevant_event_time,
         last_processed_at=view.last_processed_at,
         processing_status=view.processing_status,
-        source_event_refs=view.source_event_refs,
+        source_event_refs=[
+            s if isinstance(s, SourceEventRef) else SourceEventRef(**s)
+            for s in (view.source_event_refs or [])
+        ],
         rules_version=view.rules_version,
+        as_of=as_of,
     )
 
 
@@ -173,12 +183,19 @@ def _get_or_compute_state_view(
             attention_level=result.attention_level,
             needs_attention=result.needs_attention,
             reason_codes=result.reason_codes,
-            explanation=result.explanation,
+            explanation=[
+                e if isinstance(e, ContributingReasonExplanation) else ContributingReasonExplanation(**e)
+                for e in (result.explanation or [])
+            ],
             latest_relevant_event_time=result.latest_relevant_event_time,
             last_processed_at=clock.now(),
             processing_status=result.processing_status,
-            source_event_refs=result.source_event_refs,
+            source_event_refs=[
+                s if isinstance(s, SourceEventRef) else SourceEventRef(**s)
+                for s in (result.source_event_refs or [])
+            ],
             rules_version=result.rules_version,
+            as_of=as_of,
         )
 
     # Standard query for persisted view
@@ -187,7 +204,7 @@ def _get_or_compute_state_view(
         # Recompute synchronously if missing
         view = recompute_machine_state(machine.machine_id, session, as_of=clock.now())
 
-    return _build_machine_status_response(machine, view)
+    return _build_machine_status_response(machine, view, as_of=clock.now())
 
 
 @router.get(
@@ -212,6 +229,7 @@ def list_machines_status(
 
     Sorted by attention level descending (highest urgency first), then machine_id ascending.
     """
+    eval_as_of = as_of or clock.now()
     if as_of is not None:
         # Dynamically compute for all matching machines
         machine_query = session.query(Machine)
@@ -242,6 +260,7 @@ def list_machines_status(
             page=page,
             page_size=page_size,
             items=computed_items[start_idx:end_idx],
+            as_of=eval_as_of,
         )
 
     # Database query joining Machine and MachineStateView
@@ -268,12 +287,13 @@ def list_machines_status(
         .all()
     )
 
-    items = [_build_machine_status_response(mach, view) for view, mach in rows]
+    items = [_build_machine_status_response(mach, view, as_of=eval_as_of) for view, mach in rows]
     return PaginatedMachineStatusResponse(
         total=total,
         page=page,
         page_size=page_size,
         items=items,
+        as_of=eval_as_of,
     )
 
 
@@ -372,8 +392,14 @@ def get_plant_summary(
         line_views = machines_by_line.get(line.line_id, [])
         line_summaries.append(_compute_line_attention_summary(line, line_views))
 
-    # Sort lines by machines needing attention descending
-    line_summaries.sort(key=lambda line_sum: (-line_sum.machines_needing_attention, line_sum.line_id))
+    # Sort lines by machines needing attention descending (ties by critical count then line_id)
+    line_summaries.sort(
+        key=lambda line_sum: (
+            -line_sum.machines_needing_attention,
+            -len(line_sum.critical_machines),
+            line_sum.line_id,
+        )
+    )
 
     return PlantSummaryResponse(
         plant_id=plant.plant_id,
@@ -481,8 +507,15 @@ def get_global_summary(
         line_views = [views_by_machine_id[m.machine_id] for m in line_machines if m.machine_id in views_by_machine_id]
         all_line_summaries.append(_compute_line_attention_summary(line, line_views))
 
-    # Worst lines ranked by machines needing attention desc
-    worst_lines = sorted(all_line_summaries, key=lambda line_sum: (-line_sum.machines_needing_attention, line_sum.line_id))
+    # Worst lines ranked by machines needing attention desc (ties broken by critical count then line_id)
+    worst_lines = sorted(
+        all_line_summaries,
+        key=lambda line_sum: (
+            -line_sum.machines_needing_attention,
+            -len(line_sum.critical_machines),
+            line_sum.line_id,
+        ),
+    )
 
     # Plant summaries
     plant_summaries: list[PlantSummaryResponse] = []
@@ -513,7 +546,14 @@ def get_global_summary(
                 critical_machines=p_crit,
                 status_counts=p_status,
                 processing_status_counts=p_proc,
-                lines_needing_attention=sorted(p_lines, key=lambda line_sum: (-line_sum.machines_needing_attention, line_sum.line_id)),
+                lines_needing_attention=sorted(
+                    p_lines,
+                    key=lambda line_sum: (
+                        -line_sum.machines_needing_attention,
+                        -len(line_sum.critical_machines),
+                        line_sum.line_id,
+                    ),
+                ),
             )
         )
 

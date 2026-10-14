@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from app.core.clock import FrozenClock, get_clock
 from app.core.config import get_settings
 from app.core.logging import setup_logging
@@ -32,13 +34,23 @@ from app.workers.runner import drain_queue, run_worker
 logger = logging.getLogger(__name__)
 
 
+def clean_database(session: Session) -> None:
+    """Wipe all operational and reference tables to guarantee idempotent seed."""
+    from app.db.base import Base
+
+    for tbl in reversed(Base.metadata.sorted_tables):
+        session.execute(tbl.delete())
+    session.commit()
+
+
 def ingest_envelope_helper(
     service: IngestionService,
     envelope: dict[str, Any],
-) -> None:
+) -> list[Any]:
     """Detect vendor dialect from envelope structure and route to IngestionService."""
+    responses: list[Any] = []
     if "events" in envelope:
-        service.ingest_payload(
+        resp = service.ingest_payload(
             vendor="PulseForge",
             envelope=envelope,
             record_array_key="events",
@@ -46,8 +58,9 @@ def ingest_envelope_helper(
             machine_id_key="machine_id",
             required_envelope_keys=["vendor", "plant_id", "events"],
         )
+        responses.append(resp)
     elif "readings" in envelope:
-        service.ingest_payload(
+        resp = service.ingest_payload(
             vendor="ThermexWatch",
             envelope=envelope,
             record_array_key="readings",
@@ -55,8 +68,9 @@ def ingest_envelope_helper(
             machine_id_key="assetCode",
             required_envelope_keys=["source", "site_code", "readings"],
         )
+        responses.append(resp)
     elif "records" in envelope:
-        service.ingest_payload(
+        resp = service.ingest_payload(
             vendor="MaintaFlow",
             envelope=envelope,
             record_array_key="records",
@@ -64,8 +78,9 @@ def ingest_envelope_helper(
             machine_id_key="machine_ref",
             required_envelope_keys=["provider_name", "factory_id", "records"],
         )
+        responses.append(resp)
     elif "work_orders" in envelope:
-        service.ingest_payload(
+        resp = service.ingest_payload(
             vendor="CMMS",
             envelope=envelope,
             record_array_key="work_orders",
@@ -73,16 +88,19 @@ def ingest_envelope_helper(
             machine_id_key="machine_id",
             required_envelope_keys=["source", "work_orders"],
         )
+        responses.append(resp)
     else:
         # Multi-vendor bundle dictionary (e.g. happy_path.json, duplicates.json)
         for _, sub_envelope in envelope.items():
             if isinstance(sub_envelope, dict):
-                ingest_envelope_helper(service, sub_envelope)
+                responses.extend(ingest_envelope_helper(service, sub_envelope))
+    return responses
 
 
 def seed_database(
     base_dir: Path | None = None,
     as_of: datetime | None = None,
+    clean: bool = True,
 ) -> None:
     """Execute end-to-end deterministic database seeding."""
     settings = get_settings()
@@ -97,37 +115,69 @@ def seed_database(
 
     session = SessionLocal()
     try:
+        if clean:
+            logger.info("Cleaning existing operational and reference tables...")
+            clean_database(session)
+
         # 1. Reference Data Loading
         logger.info("Step 1: Loading authoritative reference tables from %s...", ref_dir)
         load_reference_data(session, ref_dir)
 
         ingest_service = IngestionService(session, clock)
 
+        # Track per-source counts
+        source_counts: list[dict[str, Any]] = []
+
+        def _record_counts(name: str, resps: list[Any]) -> None:
+            tot = sum(len(r.records) for r in resps)
+            acc = sum(r.accepted for r in resps)
+            dup = sum(r.duplicate for r in resps)
+            rev = sum(r.revision for r in resps)
+            rej = sum(r.rejected for r in resps)
+            source_counts.append(
+                {
+                    "source": name,
+                    "total": tot,
+                    "accepted": acc,
+                    "duplicate": dup,
+                    "revision": rev,
+                    "rejected": rej,
+                }
+            )
+
         # 2. Ingest Seed CSVs
         logger.info("Step 2: Ingesting seed CSV datasets from %s...", seed_dir)
-        # PulseForge
+        # PulseForge CSV
         pf_csv = seed_dir / "pulseforge_events.csv"
         if pf_csv.exists():
+            resps = []
             for env in map_pulseforge_csv(pf_csv):
-                ingest_envelope_helper(ingest_service, env)
+                resps.extend(ingest_envelope_helper(ingest_service, env))
+            _record_counts("PulseForge CSV", resps)
 
-        # ThermexWatch
+        # ThermexWatch CSV
         tw_csv = seed_dir / "thermexwatch_readings.csv"
         if tw_csv.exists():
+            resps = []
             for env in map_thermexwatch_csv(tw_csv):
-                ingest_envelope_helper(ingest_service, env)
+                resps.extend(ingest_envelope_helper(ingest_service, env))
+            _record_counts("ThermexWatch CSV", resps)
 
-        # MaintaFlow
+        # MaintaFlow CSV
         mf_csv = seed_dir / "maintaflow_records.csv"
         if mf_csv.exists():
+            resps = []
             for env in map_maintaflow_csv(mf_csv):
-                ingest_envelope_helper(ingest_service, env)
+                resps.extend(ingest_envelope_helper(ingest_service, env))
+            _record_counts("MaintaFlow CSV", resps)
 
-        # Work Orders
+        # Work Orders CSV
         wo_csv = seed_dir / "maintenance_work_orders.csv"
         if wo_csv.exists():
+            resps = []
             for env in map_work_orders_csv(wo_csv):
-                ingest_envelope_helper(ingest_service, env)
+                resps.extend(ingest_envelope_helper(ingest_service, env))
+            _record_counts("Work Orders CSV", resps)
 
         # 3. Ingest JSON API Samples (Tests Idempotency on overlapping keys)
         logger.info("Step 3: Ingesting JSON sample payloads from %s...", samples_dir)
@@ -136,11 +186,25 @@ def seed_database(
             try:
                 with s_file.open("r", encoding="utf-8") as f:
                     content = json.load(f)
-                ingest_envelope_helper(ingest_service, content)
+                resps = ingest_envelope_helper(ingest_service, content)
+                _record_counts(s_file.name, resps)
             except Exception as exc:
-                logger.warning("Handled expected sample error or malformed envelope in %s: %s", s_file.name, exc)
+                logger.warning("Handled expected sample error in %s: %s", s_file.name, exc)
 
         session.commit()
+
+        # Print Per-Source Counts Report
+        print("\n" + "=" * 90)
+        print("AURIK SEED INGESTION REPORT (Per-Source Counts)")
+        print("=" * 90)
+        print(f"{'Source':<32} | {'Records':<8} | {'Accepted':<8} | {'Duplicate':<10} | {'Revision':<8} | {'Rejected':<8}")
+        print("-" * 90)
+        for sc in source_counts:
+            print(
+                f"{sc['source']:<32} | {sc['total']:<8} | {sc['accepted']:<8} | "
+                f"{sc['duplicate']:<10} | {sc['revision']:<8} | {sc['rejected']:<8}"
+            )
+        print("=" * 90 + "\n")
 
         # 4. Drain Worker Queue
         logger.info("Step 4: Draining background queue (processing normalization & recomputes)...")
@@ -192,6 +256,12 @@ def main() -> None:
         default=None,
         help="Optional ISO UTC timestamp (default: 2026-04-18T09:00:00Z)",
     )
+    seed_parser.add_argument(
+        "--clean",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Wipe operational and reference tables before seeding (default: True)",
+    )
 
     # Worker
     subparsers.add_parser("worker", help="Start continuous background queue worker")
@@ -204,7 +274,7 @@ def main() -> None:
 
     if args.command == "seed":
         as_of_dt = datetime.fromisoformat(args.as_of) if args.as_of else None
-        seed_database(as_of=as_of_dt)
+        seed_database(as_of=as_of_dt, clean=args.clean)
     elif args.command == "worker":
         run_worker()
     elif args.command == "recompute":

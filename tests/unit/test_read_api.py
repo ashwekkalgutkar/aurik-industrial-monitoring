@@ -97,11 +97,33 @@ def _seed_sample_views() -> None:
             attention_level=1,
             needs_attention=False,
             reason_codes=["VIBRATION_HIGH"],
-            explanation=[{"reason_code": "VIBRATION_HIGH", "attention": 1}],
+            explanation=[
+                {
+                    "reason_code": "VIBRATION_HIGH",
+                    "attention_contribution": 1,
+                    "rule_applied": "Active vibration alert within TTL.",
+                    "observed_value": {"vibration_mm_s": 5.2},
+                    "signal_refs": [
+                        {
+                            "vendor": "PulseForge",
+                            "record_id": "PF-01",
+                            "raw_record_id": "00000000-0000-0000-0000-000000000001",
+                            "role": "alert",
+                        }
+                    ],
+                }
+            ],
             latest_relevant_event_time=now,
             last_processed_at=now,
             processing_status="FRESH",
-            source_event_refs=[{"vendor": "PulseForge", "record_id": "PF-01"}],
+            source_event_refs=[
+                {
+                    "vendor": "PulseForge",
+                    "record_id": "PF-01",
+                    "raw_record_id": "00000000-0000-0000-0000-000000000001",
+                    "role": "alert",
+                }
+            ],
             rules_version="1.0.0",
         )
         v2 = MachineStateView(
@@ -112,11 +134,33 @@ def _seed_sample_views() -> None:
             attention_level=4,
             needs_attention=True,
             reason_codes=["TEMPERATURE_ABOVE_RATED"],
-            explanation=[{"reason_code": "TEMPERATURE_ABOVE_RATED", "attention": 4}],
+            explanation=[
+                {
+                    "reason_code": "TEMPERATURE_ABOVE_RATED",
+                    "attention_contribution": 4,
+                    "rule_applied": "Critical temperature alert within TTL.",
+                    "observed_value": {"temperature_c": 96.4},
+                    "signal_refs": [
+                        {
+                            "vendor": "ThermexWatch",
+                            "record_id": "TW-02",
+                            "raw_record_id": "00000000-0000-0000-0000-000000000002",
+                            "role": "alert",
+                        }
+                    ],
+                }
+            ],
             latest_relevant_event_time=now,
             last_processed_at=now,
             processing_status="FRESH",
-            source_event_refs=[{"vendor": "ThermexWatch", "record_id": "TW-02"}],
+            source_event_refs=[
+                {
+                    "vendor": "ThermexWatch",
+                    "record_id": "TW-02",
+                    "raw_record_id": "00000000-0000-0000-0000-000000000002",
+                    "role": "alert",
+                }
+            ],
             rules_version="1.0.0",
         )
         v3 = MachineStateView(

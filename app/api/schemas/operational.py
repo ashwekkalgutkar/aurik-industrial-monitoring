@@ -6,6 +6,32 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class SourceEventRef(BaseModel):
+    """Reference to an ingested source vendor event contributing to state."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    vendor: str = Field(description="Vendor name: PulseForge | ThermexWatch | MaintaFlow | CMMS")
+    record_id: str = Field(description="Vendor-assigned record or event identifier")
+    raw_record_id: str = Field(description="UUID of the ingested raw record in database")
+    role: str = Field(description="Role played by this signal in state evaluation (e.g. alert, recovery, resolution, inspection, work_order)")
+    event_time: datetime | str | None = Field(default=None, description="Timestamp of the event in UTC")
+
+
+class ContributingReasonExplanation(BaseModel):
+    """Detailed trace item explaining a status decision per reason code."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    reason_code: str | None = Field(default=None, description="Reason code from closed enum (None if criticality escalation)")
+    attention_contribution: int = Field(description="Attention level contribution (0 to 4)")
+    rule_applied: str = Field(description="Deterministic rule or threshold logic applied")
+    observed_value: Any = Field(default=None, description="Observed measurement, status, note, or asset criticality")
+    threshold_applied: str | float | None = Field(default=None, description="Threshold or boundary value applied, if applicable")
+    signal_refs: list[SourceEventRef] = Field(default_factory=list, description="Source event references contributing to this reason")
+    contributing_signal_refs: list[SourceEventRef] = Field(default_factory=list, description="Contributing signal references")
+
+
 class MachineStatusResponse(BaseModel):
     """Authoritative machine operational attention view."""
 
@@ -23,16 +49,19 @@ class MachineStatusResponse(BaseModel):
     attention_level: int = Field(description="Normalized attention level from 0 (nominal) to 4 (critical)")
     needs_attention: bool = Field(description="True if machine requires operator or maintenance action (attention >= 2)")
     reason_codes: list[str] = Field(description="Authoritative reason codes explaining status determination")
-    explanation: list[dict[str, Any]] = Field(description="Detailed trace explaining each contributing factor")
+    explanation: list[ContributingReasonExplanation] = Field(
+        description="Detailed trace explaining each contributing factor per reason code"
+    )
     latest_relevant_event_time: datetime | None = Field(
         default=None, description="Timestamp of the latest processed event contributing to state"
     )
     last_processed_at: datetime = Field(description="Timestamp when state was recomputed")
     processing_status: str = Field(description="Freshness and reliability state: FRESH | STALE | PARTIAL | FAILED")
-    source_event_refs: list[dict[str, Any]] = Field(
+    source_event_refs: list[SourceEventRef] = Field(
         description="Audit references to source vendor records contributing to state"
     )
     rules_version: str = Field(description="Semantic version of the rules engine used for computation")
+    as_of: datetime | None = Field(default=None, description="Point in time used for evaluation")
 
 
 class PaginatedMachineStatusResponse(BaseModel):
@@ -42,6 +71,7 @@ class PaginatedMachineStatusResponse(BaseModel):
     page: int = Field(description="Current 1-based page number")
     page_size: int = Field(description="Page size limit")
     items: list[MachineStatusResponse] = Field(description="Page records ordered by attention desc, machine_id asc")
+    as_of: datetime | None = Field(default=None, description="Point in time used for evaluation")
 
 
 class LineAttentionSummary(BaseModel):

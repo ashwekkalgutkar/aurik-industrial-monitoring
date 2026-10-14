@@ -22,7 +22,7 @@ _connect_args: dict[str, Any] = {}
 if "postgresql" in _settings.DATABASE_URL:
     _connect_args = {
         "connect_timeout": _settings.DB_CONNECT_TIMEOUT_SECONDS,
-        "options": f"-c statement_timeout={_settings.DB_STATEMENT_TIMEOUT_MS}",
+        "options": f"-c statement_timeout={_settings.DB_STATEMENT_TIMEOUT_MS} -c timezone=UTC",
     }
 
 engine = create_engine(

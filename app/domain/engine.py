@@ -50,20 +50,23 @@ class ReasonCode(StrEnum):
 class ContributingReason:
     """Detailed trace item explaining a status decision."""
 
-    code: ReasonCode
+    code: ReasonCode | None
     attention: int
     rule: str
     observed_value: Any
     signal_refs: list[dict[str, Any]]
+    threshold: str | float | None = None
     event_time: datetime | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "reason_code": str(self.code),
+            "reason_code": str(self.code) if self.code is not None else None,
             "attention_contribution": self.attention,
-            "rule": self.rule,
+            "rule_applied": self.rule,
             "observed_value": self.observed_value,
+            "threshold_applied": self.threshold,
             "signal_refs": self.signal_refs,
+            "contributing_signal_refs": self.signal_refs,
         }
 
 
@@ -101,11 +104,12 @@ def evaluate_machine_state(
     reasons: list[ContributingReason] = []
     source_event_refs: list[dict[str, Any]] = []
 
-    def _sig_ref(s: NormalizedSignal) -> dict[str, Any]:
+    def _sig_ref(s: NormalizedSignal, role: str = "alert") -> dict[str, Any]:
         return {
             "vendor": s.source_vendor,
             "record_id": s.source_record_id,
             "raw_record_id": s.raw_record_id,
+            "role": role,
             "event_time": s.event_time.isoformat(),
         }
 
@@ -150,19 +154,21 @@ def evaluate_machine_state(
 
     for s in dimension_signals:
         # Check if suppressed by a later maintenance resolution
-        suppressing_res = next((r for r_time, r in resolutions if r_time > s.event_time), None)
-        if suppressing_res:
+        matching_res = [(r_time, r) for r_time, r in resolutions if r_time > s.event_time]
+        if matching_res:
+            r_time, suppressing_res = max(matching_res, key=lambda x: x[0])
             reasons.append(
                 ContributingReason(
                     code=ReasonCode.RESOLVED_BY_MAINTENANCE,
                     attention=0,
                     rule="Alert earlier than completed maintenance was resolved.",
                     observed_value=s.canonical_event_type,
-                    signal_refs=[_sig_ref(s), _sig_ref(suppressing_res)],
-                    event_time=suppressing_res.event_time,
+                    signal_refs=[_sig_ref(s, role="alert"), _sig_ref(suppressing_res, role="resolution")],
+                    threshold="maintenance_completed",
+                    event_time=r_time,
                 )
             )
-            source_event_refs.append(_sig_ref(suppressing_res))
+            source_event_refs.append(_sig_ref(suppressing_res, role="resolution"))
             continue
 
         # Check if cleared by a later NOMINAL signal
@@ -175,19 +181,22 @@ def evaluate_machine_state(
                     attention=0,
                     rule="Alert cleared by newer recovery/nominal signal.",
                     observed_value=f"Cleared by {clearing_nom.source_vendor} nominal signal",
-                    signal_refs=[_sig_ref(clearing_nom)],
+                    signal_refs=[_sig_ref(s, role="alert"), _sig_ref(clearing_nom, role="recovery")],
+                    threshold="recovery_signal_received",
                     event_time=clearing_nom.event_time,
                 )
             )
-            source_event_refs.append(_sig_ref(clearing_nom))
+            source_event_refs.append(_sig_ref(clearing_nom, role="recovery"))
             continue
 
         # Alert is ACTIVE! Calculate attention
         att = s.severity or 1
         code: ReasonCode
+        thresh: str | float | None = None
 
         if s.dimension == Dimension.VIBRATION:
             code = ReasonCode.VIBRATION_HIGH
+            thresh = machine.rated_max_vibration_mm_s
             if (
                 s.vibration_mm_s is not None
                 and s.vibration_mm_s >= machine.rated_max_vibration_mm_s
@@ -201,9 +210,11 @@ def evaluate_machine_state(
             ):
                 att = max(att, 2)
                 code = ReasonCode.VIBRATION_HIGH
+                thresh = round(machine.rated_max_vibration_mm_s * settings.VIB_NEAR_LIMIT_RATIO, 2)
 
         elif s.dimension == Dimension.TEMPERATURE:
             code = ReasonCode.TEMPERATURE_HIGH
+            thresh = machine.rated_max_temp_c
             if s.canonical_event_type == CanonicalEventType.TEMPERATURE_CRITICAL:
                 att = 4
                 code = ReasonCode.TEMPERATURE_ABOVE_RATED
@@ -216,10 +227,12 @@ def evaluate_machine_state(
             ):
                 att = max(att, 2)
                 code = ReasonCode.TEMPERATURE_HIGH
+                thresh = round(machine.rated_max_temp_c * settings.TEMP_NEAR_LIMIT_RATIO, 2)
 
         elif s.dimension == Dimension.POWER:
             code = ReasonCode.POWER_ANOMALY
             att = 2
+            thresh = f"baseline {machine.baseline_power_kw} kW"
             if s.machine_state == "idle":
                 # Idle power anomaly de-escalated to attention 1
                 att = 1
@@ -233,6 +246,7 @@ def evaluate_machine_state(
                 )
                 if dev_pct > settings.POWER_DEVIATION_PCT and (s.severity or 0) >= 3:
                     att = 3
+                    thresh = f">{settings.POWER_DEVIATION_PCT}% deviation from {machine.baseline_power_kw} kW"
 
         reasons.append(
             ContributingReason(
@@ -245,11 +259,12 @@ def evaluate_machine_state(
                     "temperature_c": s.temperature_c,
                     "power_kw": s.power_kw,
                 },
-                signal_refs=[_sig_ref(s)],
+                signal_refs=[_sig_ref(s, role="alert")],
+                threshold=thresh,
                 event_time=s.event_time,
             )
         )
-        source_event_refs.append(_sig_ref(s))
+        source_event_refs.append(_sig_ref(s, role="alert"))
 
     # -------------------------------------------------------------------------
     # 4. Cross-Vendor Conflict Detection (Rule 7)
@@ -270,10 +285,13 @@ def evaluate_machine_state(
                                 "recovery_vendor": s2.source_vendor,
                                 "time_diff_seconds": time_diff.total_seconds(),
                             },
-                            signal_refs=[_sig_ref(s1), _sig_ref(s2)],
+                            signal_refs=[_sig_ref(s1, role="alert"), _sig_ref(s2, role="recovery")],
+                            threshold=f"window <= {settings.VENDOR_CONFLICT_WINDOW_MINUTES}m",
                             event_time=max(s1.event_time, s2.event_time),
                         )
                     )
+                    source_event_refs.append(_sig_ref(s1, role="alert"))
+                    source_event_refs.append(_sig_ref(s2, role="recovery"))
 
     # -------------------------------------------------------------------------
     # 5. Unmapped Alert Code Signals (Rule 3)
@@ -290,18 +308,16 @@ def evaluate_machine_state(
                 attention=1,
                 rule="Unmapped alert code received; contributes attention 1, never cleared by NOMINAL.",
                 observed_value=u.details.get("raw_alert_code") or u.details.get("raw_event_type"),
-                signal_refs=[_sig_ref(u)],
+                signal_refs=[_sig_ref(u, role="unmapped_alert")],
+                threshold="unmapped_code",
                 event_time=u.event_time,
             )
         )
-        source_event_refs.append(_sig_ref(u))
+        source_event_refs.append(_sig_ref(u, role="unmapped_alert"))
 
     # -------------------------------------------------------------------------
     # 6. Sensor Quality & Trust (Rule 4 & User Directive on SENSOR_DEGRADED)
     # -------------------------------------------------------------------------
-    # User directive: "SENSOR_DEGRADED signals (dimension SENSOR) never contribute
-    # more than attention 1, regardless of their vendor severity. They only produce
-    # LOW_SIGNAL_TRUST, as in engine rule 4."
     vendor_streams: dict[str, NormalizedSignal] = {}
     for s in signals:
         if (
@@ -329,11 +345,12 @@ def evaluate_machine_state(
                     observed_value=latest_sensor_sig.sensor_quality
                     if latest_sensor_sig.sensor_quality is not None
                     else "SENSOR_DEGRADED",
-                    signal_refs=[_sig_ref(latest_sensor_sig)],
+                    signal_refs=[_sig_ref(latest_sensor_sig, role="sensor")],
+                    threshold=f"quality < {settings.SENSOR_QUALITY_MIN}",
                     event_time=latest_sensor_sig.event_time,
                 )
             )
-            source_event_refs.append(_sig_ref(latest_sensor_sig))
+            source_event_refs.append(_sig_ref(latest_sensor_sig, role="sensor"))
 
     # -------------------------------------------------------------------------
     # 7. Maintenance State (Rule 5: state-based, latest wins per kind)
@@ -353,11 +370,12 @@ def evaluate_machine_state(
                     attention=3,
                     rule="Latest inspection found major defect.",
                     observed_value=latest_inspection.details.get("technician_note"),
-                    signal_refs=[_sig_ref(latest_inspection)],
+                    signal_refs=[_sig_ref(latest_inspection, role="inspection")],
+                    threshold="major_defect_found",
                     event_time=latest_inspection.event_time,
                 )
             )
-            source_event_refs.append(_sig_ref(latest_inspection))
+            source_event_refs.append(_sig_ref(latest_inspection, role="inspection"))
         elif insp_res in ("minor_defect_found", "passed_with_observation"):
             reasons.append(
                 ContributingReason(
@@ -365,11 +383,12 @@ def evaluate_machine_state(
                     attention=1,
                     rule="Latest inspection recorded minor defect or observation.",
                     observed_value=latest_inspection.details.get("technician_note"),
-                    signal_refs=[_sig_ref(latest_inspection)],
+                    signal_refs=[_sig_ref(latest_inspection, role="inspection")],
+                    threshold="minor_defect_found",
                     event_time=latest_inspection.event_time,
                 )
             )
-            source_event_refs.append(_sig_ref(latest_inspection))
+            source_event_refs.append(_sig_ref(latest_inspection, role="inspection"))
 
     # Latest maintenance status
     maint_updates = [
@@ -388,11 +407,12 @@ def evaluate_machine_state(
                     attention=2,
                     rule="Latest maintenance status is overdue.",
                     observed_value=latest_maint_update.details.get("days_since_last_service"),
-                    signal_refs=[_sig_ref(latest_maint_update)],
+                    signal_refs=[_sig_ref(latest_maint_update, role="maintenance")],
+                    threshold="overdue",
                     event_time=latest_maint_update.event_time,
                 )
             )
-            source_event_refs.append(_sig_ref(latest_maint_update))
+            source_event_refs.append(_sig_ref(latest_maint_update, role="maintenance"))
         elif m_stat == "due_soon":
             reasons.append(
                 ContributingReason(
@@ -400,11 +420,12 @@ def evaluate_machine_state(
                     attention=1,
                     rule="Latest maintenance status is due soon.",
                     observed_value=latest_maint_update.details.get("days_since_last_service"),
-                    signal_refs=[_sig_ref(latest_maint_update)],
+                    signal_refs=[_sig_ref(latest_maint_update, role="maintenance")],
+                    threshold="due_soon",
                     event_time=latest_maint_update.event_time,
                 )
             )
-            source_event_refs.append(_sig_ref(latest_maint_update))
+            source_event_refs.append(_sig_ref(latest_maint_update, role="maintenance"))
 
     # Calibration pending
     calibrations = [s for s in signals if s.signal_kind == SignalKind.CALIBRATION]
@@ -416,11 +437,12 @@ def evaluate_machine_state(
                 attention=1,
                 rule="Sensor package awaiting recalibration.",
                 observed_value=latest_cal.details.get("technician_note"),
-                signal_refs=[_sig_ref(latest_cal)],
+                signal_refs=[_sig_ref(latest_cal, role="calibration")],
+                threshold="calibration_pending",
                 event_time=latest_cal.event_time,
             )
         )
-        source_event_refs.append(_sig_ref(latest_cal))
+        source_event_refs.append(_sig_ref(latest_cal, role="calibration"))
 
     # Open Work Orders
     work_orders = [s for s in signals if s.signal_kind == SignalKind.WORK_ORDER]
@@ -434,26 +456,29 @@ def evaluate_machine_state(
                 attention=1,
                 rule=f"Open work order '{wo.source_record_id}' ({wo.details.get('maintenance_type')}).",
                 observed_value=wo.details.get("notes"),
-                signal_refs=[_sig_ref(wo)],
+                signal_refs=[_sig_ref(wo, role="work_order")],
+                threshold="status == open",
                 event_time=wo.event_time,
             )
         )
-        source_event_refs.append(_sig_ref(wo))
+        source_event_refs.append(_sig_ref(wo, role="work_order"))
 
     # Operator Notes Concern
     op_notes = [s for s in signals if s.signal_kind == SignalKind.OPERATOR_NOTE]
     for op in op_notes:
         if (op.severity or 0) > 0:
-            suppressing_res = next((r for r_time, r in resolutions if r_time > op.event_time), None)
-            if suppressing_res:
+            matching_res = [(r_time, r) for r_time, r in resolutions if r_time > op.event_time]
+            if matching_res:
+                r_time, suppressing_res = max(matching_res, key=lambda x: x[0])
                 reasons.append(
                     ContributingReason(
                         code=ReasonCode.RESOLVED_BY_MAINTENANCE,
                         attention=0,
                         rule="Operator concern cleared by completed maintenance.",
                         observed_value=op.details.get("technician_note"),
-                        signal_refs=[_sig_ref(op), _sig_ref(suppressing_res)],
-                        event_time=suppressing_res.event_time,
+                        signal_refs=[_sig_ref(op, role="operator_note"), _sig_ref(suppressing_res, role="resolution")],
+                        threshold="maintenance_completed",
+                        event_time=r_time,
                     )
                 )
             else:
@@ -463,21 +488,24 @@ def evaluate_machine_state(
                         attention=1,
                         rule="Operator note recorded machine anomaly/concern.",
                         observed_value=op.details.get("technician_note"),
-                        signal_refs=[_sig_ref(op)],
+                        signal_refs=[_sig_ref(op, role="operator_note")],
+                        threshold="severity > 0",
                         event_time=op.event_time,
                     )
                 )
-                source_event_refs.append(_sig_ref(op))
+                source_event_refs.append(_sig_ref(op, role="operator_note"))
 
     # -------------------------------------------------------------------------
     # 8. Compute Attention & Apply Criticality Bump (Rule 8)
     # -------------------------------------------------------------------------
     raw_max_attention = max((r.attention for r in reasons), default=0)
 
-    # Criticality escalation: if machine criticality is high and computed attention >= 2, raise by at most 1
+    # Criticality escalation: applied only as a one-step bump when computed attention is already >= 2 and criticality is high
     final_attention = raw_max_attention
+    criticality_bump_applied = False
     if machine.criticality == "high" and raw_max_attention >= 2:
         final_attention = min(4, raw_max_attention + 1)
+        criticality_bump_applied = True
 
     # -------------------------------------------------------------------------
     # 9. Derived Status & Maintenance Overrides (Rule 9)
@@ -510,6 +538,7 @@ def evaluate_machine_state(
                 rule="Machine marked under maintenance in reference or scheduled work order.",
                 observed_value=machine.asset_status,
                 signal_refs=[],
+                threshold="asset_status == maintenance",
                 event_time=None,
             )
         )
@@ -525,6 +554,7 @@ def evaluate_machine_state(
                 rule=f"No telemetry signals received within {settings.ALERT_TTL_MINUTES}m TTL window.",
                 observed_value=None,
                 signal_refs=[],
+                threshold=f"no signals within {settings.ALERT_TTL_MINUTES}m",
                 event_time=None,
             )
         )
@@ -576,23 +606,62 @@ def evaluate_machine_state(
         reverse=True,
     )
 
-    # Deduplicate reason codes preserving highest attention order
     ordered_reason_codes: list[str] = []
+    consolidated_reasons: list[ContributingReason] = []
+    seen_codes: set[str] = set()
+
     for r in reasons:
-        r_str = str(r.code)
-        if r_str not in ordered_reason_codes:
-            ordered_reason_codes.append(r_str)
+        if r.code is None:
+            continue
+        code_str = str(r.code)
+        if code_str not in seen_codes:
+            seen_codes.add(code_str)
+            ordered_reason_codes.append(code_str)
+            consolidated_reasons.append(
+                ContributingReason(
+                    code=r.code,
+                    attention=r.attention,
+                    rule=r.rule,
+                    observed_value=r.observed_value,
+                    signal_refs=list(r.signal_refs),
+                    threshold=r.threshold,
+                    event_time=r.event_time,
+                )
+            )
+        else:
+            target = next(c for c in consolidated_reasons if str(c.code) == code_str)
+            target.attention = max(target.attention, r.attention)
+            if r.event_time and (target.event_time is None or r.event_time > target.event_time):
+                target.event_time = r.event_time
+            existing_keys = {f"{ref['vendor']}:{ref['record_id']}" for ref in target.signal_refs}
+            for ref in r.signal_refs:
+                k = f"{ref['vendor']}:{ref['record_id']}"
+                if k not in existing_keys:
+                    target.signal_refs.append(ref)
+                    existing_keys.add(k)
+
+    explanation_list = [r.to_dict() for r in consolidated_reasons]
+
+    # Criticality bump explanation: recorded in explanation only when actually applied, never a reason code
+    if criticality_bump_applied:
+        explanation_list.append({
+            "reason_code": None,
+            "attention_contribution": 1,
+            "rule_applied": "Asset criticality 'high' escalated attention level by 1 step because raw computed attention >= 2.",
+            "observed_value": {"criticality": machine.criticality, "raw_attention": raw_max_attention},
+            "threshold_applied": "raw_attention >= 2",
+            "signal_refs": [],
+            "contributing_signal_refs": [],
+        })
 
     # latest_relevant_event_time = event_time of newest signal contributing to a reason (or newest effective signal)
-    contributing_times = [r.event_time for r in reasons if r.event_time is not None]
+    contributing_times = [r.event_time for r in consolidated_reasons if r.event_time is not None]
     if contributing_times:
         latest_relevant_time = max(contributing_times)
     elif latest_sig:
         latest_relevant_time = latest_sig.event_time
     else:
         latest_relevant_time = None
-
-    explanation_list = [r.to_dict() for r in reasons]
 
     # Deduplicate source event refs preserving order
     seen_refs: set[str] = set()

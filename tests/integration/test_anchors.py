@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.cli import seed_database
 from app.core.config import get_settings
+from app.domain.engine import ReasonCode
 from app.main import app
 
 client = TestClient(app)
@@ -33,7 +34,13 @@ def seed_environment() -> None:
 # 1. Anchor Machine State Expectations (EQ-001 through EQ-008)
 # ===========================================================================
 def test_anchor_eq001_watch():
-    """EQ-001: high vibration cleared by recovery, minor inspection note -> WATCH (att 1, needs_attention=False)."""
+    # Derivation:
+    # All vibration alerts (PF-1001, PF-1101, TW-8801, PF-1301) are older than recovery signal
+    # PF-1302 at 08:32:05Z, which clears them -> RECOVERING (att 0).
+    # Latest inspection MF-501 at 08:14:05 recorded minor defect -> INSPECTION_MINOR_DEFECT (att 1).
+    # Max attention = 1 -> WATCH, needs_attention=False.
+    # Latest relevant event time is 08:32:05Z (recovery PF-1302).
+    # Latest signal PF-1302 (< 30 min from 09:00:00Z) -> FRESH.
     resp = client.get("/v1/machines/EQ-001/status", headers=READ_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
@@ -43,14 +50,19 @@ def test_anchor_eq001_watch():
     assert data["derived_status"] == "WATCH"
     assert data["attention_level"] == 1
     assert data["needs_attention"] is False
-    assert "INSPECTION_MINOR_DEFECT" in data["reason_codes"]
+    assert data["processing_status"] == "FRESH"
+    assert set(data["reason_codes"]) == {"INSPECTION_MINOR_DEFECT", "RECOVERING"}
+    assert data["latest_relevant_event_time"].startswith("2026-04-18T08:32:05")
 
 
 def test_anchor_eq002_critical_only():
-    """EQ-002: severe temp spike exceeding rated limit -> CRITICAL (att 4, needs_attention=True).
-
-    Must be the ONLY critical machine in the plant / system.
-    """
+    # Derivation:
+    # PF-1002 temp 96.4C exceeds rated 90.0C (att 3).
+    # TW-8803 TEMP_CRIT at 07:58:40Z escalates attention to 4 -> CRITICAL, needs_attention=True.
+    # Contributing reasons include TEMPERATURE_ABOVE_RATED, MAINT_OVERDUE (MF-503, MF-901 overdue),
+    # and OPEN_WORK_ORDER (WO-1001 open cooling_system).
+    # PF-1202 malformed record (bad timestamp format) resolved to EQ-002 within TTL -> PARTIAL.
+    # Latest relevant event time is 08:49:00Z (MF-901 overdue update).
     resp = client.get("/v1/machines/EQ-002/status", headers=READ_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
@@ -60,11 +72,17 @@ def test_anchor_eq002_critical_only():
     assert data["derived_status"] == "CRITICAL"
     assert data["attention_level"] == 4
     assert data["needs_attention"] is True
-    assert "TEMPERATURE_ABOVE_RATED" in data["reason_codes"]
+    assert data["processing_status"] == "PARTIAL"
+    assert {"TEMPERATURE_ABOVE_RATED", "MAINT_OVERDUE", "OPEN_WORK_ORDER"}.issubset(set(data["reason_codes"]))
+    assert data["latest_relevant_event_time"].startswith("2026-04-18T08:49:00")
 
 
 def test_anchor_eq003_healthy():
-    """EQ-003: recovery signal and OK nominal signal -> HEALTHY (att 0, needs_attention=False)."""
+    # Derivation:
+    # Only NOMINAL telemetry received: PF-1003 (07:56:40Z), TW-8802 (07:56:50Z), PF-1102 (08:17:01Z).
+    # Telemetry on NOMINAL signals never raises attention. Attention = 0 -> HEALTHY, needs_attention=False.
+    # Reason codes array is empty.
+    # Latest signal PF-1102 at 08:17:01Z is older than 30 min from 09:00:00Z -> STALE.
     resp = client.get("/v1/machines/EQ-003/status", headers=READ_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
@@ -74,10 +92,18 @@ def test_anchor_eq003_healthy():
     assert data["derived_status"] == "HEALTHY"
     assert data["attention_level"] == 0
     assert data["needs_attention"] is False
+    assert data["processing_status"] == "STALE"
+    assert data["reason_codes"] == []
+    assert data["latest_relevant_event_time"].startswith("2026-04-18T08:17:01")
 
 
 def test_anchor_eq004_resolved_by_maintenance():
-    """EQ-004: power drop investigated and closed with check passed -> HEALTHY (att 0, RESOLVED_BY_MAINTENANCE)."""
+    # Derivation:
+    # Closed work order WO-1002 (post_maintenance_check=passed, closed at 08:10:00Z) and completed
+    # maintenance MF-701 at 08:40:00Z resolve and suppress earlier power drop alerts (PF-1004, TW-8804)
+    # and operator notes (MF-502, MF-700) -> RESOLVED_BY_MAINTENANCE (att 0).
+    # Attention = 0 -> HEALTHY, needs_attention=False.
+    # Latest signal MF-701 at 08:40:00Z is fresh (< 30 min) -> FRESH.
     resp = client.get("/v1/machines/EQ-004/status", headers=READ_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
@@ -87,11 +113,20 @@ def test_anchor_eq004_resolved_by_maintenance():
     assert data["derived_status"] == "HEALTHY"
     assert data["attention_level"] == 0
     assert data["needs_attention"] is False
-    assert "RESOLVED_BY_MAINTENANCE" in data["reason_codes"]
+    assert data["processing_status"] == "FRESH"
+    assert set(data["reason_codes"]) == {"RESOLVED_BY_MAINTENANCE"}
+    assert data["latest_relevant_event_time"].startswith("2026-04-18T08:40:00")
 
 
 def test_anchor_eq005_degraded_partial():
-    """EQ-005: active vibration alert and partial parse records -> DEGRADED (att >= 3, needs_attention=True, PARTIAL)."""
+    # Derivation:
+    # Rated max vibration is 8.0 mm/s.
+    # PF-1005 measured 8.4 mm/s, PF-1501 measured 8.8 mm/s -> both exceed rated 8.0 mm/s (att 3).
+    # Reasons include VIBRATION_ABOVE_RATED, INSPECTION_MINOR_DEFECT (MF-504, MF-601 observation),
+    # and MAINT_DUE_SOON. Medium asset criticality -> no criticality bump.
+    # Max attention = 3 -> DEGRADED, needs_attention=True.
+    # PF-1502 rejected for invalid event_time ('bad-time') and resolved to EQ-005 within TTL -> PARTIAL.
+    # Latest relevant event time is 08:47:12Z (PF-1501).
     resp = client.get("/v1/machines/EQ-005/status", headers=READ_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
@@ -99,13 +134,21 @@ def test_anchor_eq005_degraded_partial():
     assert data["plant_id"] == "PLANT_02"
     assert data["line_id"] == "LINE-D"
     assert data["derived_status"] == "DEGRADED"
-    assert data["attention_level"] >= 3
+    assert data["attention_level"] == 3
     assert data["needs_attention"] is True
     assert data["processing_status"] == "PARTIAL"
+    assert {"VIBRATION_ABOVE_RATED", "INSPECTION_MINOR_DEFECT", "MAINT_DUE_SOON"}.issubset(set(data["reason_codes"]))
+    assert data["latest_relevant_event_time"].startswith("2026-04-18T08:47:12")
 
 
 def test_anchor_eq006_watch_sensor_degraded():
-    """EQ-006: SENSOR_DEGRADED signal capped at attention 1 -> WATCH (att 1, needs_attention=False, LOW_SIGNAL_TRUST)."""
+    # Derivation:
+    # PF-1006 SENSOR_HEALTH_DROP has sensor_health=0.49 < 0.50 minimum quality threshold.
+    # Per engine rule 4, sensor degraded signals never exceed attention 1 and produce LOW_SIGNAL_TRUST.
+    # Nominal signal TW-9902 at 08:15:25Z does not clear sensor quality issues.
+    # Attention = 1 -> WATCH, needs_attention=False.
+    # Latest signal TW-9902 at 08:15:25Z is older than 30 min from 09:00:00Z -> STALE.
+    # Latest relevant event time is 07:50:10Z (PF-1006).
     resp = client.get("/v1/machines/EQ-006/status", headers=READ_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
@@ -115,11 +158,20 @@ def test_anchor_eq006_watch_sensor_degraded():
     assert data["derived_status"] == "WATCH"
     assert data["attention_level"] == 1
     assert data["needs_attention"] is False
-    assert "LOW_SIGNAL_TRUST" in data["reason_codes"]
+    assert data["processing_status"] == "STALE"
+    assert set(data["reason_codes"]) == {"LOW_SIGNAL_TRUST"}
+    assert data["latest_relevant_event_time"].startswith("2026-04-18T07:50:10")
 
 
 def test_anchor_eq007_under_maintenance():
-    """EQ-007: active recalibration work order -> UNDER_MAINTENANCE (needs_attention=False)."""
+    # Derivation:
+    # Machine marked with asset_status='maintenance' in asset reference and has open scheduled
+    # recalibration work order WO-1004 (06:50:00Z). MF-506 calibration_pending at 06:55:00Z.
+    # TW-8807 at 07:46:40Z has alertCode OK with is_active=False (idle telemetry, not an alarm).
+    # Attention = 1 with maintenance override -> UNDER_MAINTENANCE, needs_attention=False.
+    # Full reasons: {CALIBRATION_PENDING, OPEN_WORK_ORDER, MACHINE_IN_MAINTENANCE}.
+    # Latest signal TW-8807 at 07:46:40Z is older than 30 min -> STALE.
+    # Latest relevant event time is 06:55:00Z (MF-506).
     resp = client.get("/v1/machines/EQ-007/status", headers=READ_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
@@ -127,12 +179,22 @@ def test_anchor_eq007_under_maintenance():
     assert data["plant_id"] == "PLANT_02"
     assert data["line_id"] == "LINE-E"
     assert data["derived_status"] == "UNDER_MAINTENANCE"
+    assert data["attention_level"] == 1
     assert data["needs_attention"] is False
-    assert "MACHINE_IN_MAINTENANCE" in data["reason_codes"]
+    assert data["processing_status"] == "STALE"
+    assert set(data["reason_codes"]) == {"CALIBRATION_PENDING", "OPEN_WORK_ORDER", "MACHINE_IN_MAINTENANCE"}
+    assert data["latest_relevant_event_time"].startswith("2026-04-18T06:55:00")
 
 
 def test_anchor_eq008_degraded():
-    """EQ-008: temperature spike and loose heat shield defect -> DEGRADED (att 3, needs_attention=True)."""
+    # Derivation:
+    # Latest inspection MF-801 at 08:41:00Z found major defect (loose heat shield) -> att 3 -> DEGRADED.
+    # Open work order WO-1003 for heat_shield (att 1).
+    # TW-9912 alert code UNKNOWN_ALERT at 08:17:00Z contributes UNMAPPED_ALERT_CODE (att 1, never cleared by NOMINAL).
+    # TW-9921 TEMP_CRIT at 08:29:10Z is cleared by PF-1401 RECOVERY_SIGNAL at 08:39:10Z -> RECOVERING.
+    # Time diff (10 min) > 5 min conflict window, so zero VENDOR_CONFLICT.
+    # Full reason codes exactly: {INSPECTION_MAJOR_DEFECT, UNMAPPED_ALERT_CODE, OPEN_WORK_ORDER, RECOVERING}.
+    # Latest signal MF-801 at 08:41:00Z (< 30 min) -> FRESH.
     resp = client.get("/v1/machines/EQ-008/status", headers=READ_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
@@ -142,7 +204,9 @@ def test_anchor_eq008_degraded():
     assert data["derived_status"] == "DEGRADED"
     assert data["attention_level"] == 3
     assert data["needs_attention"] is True
-    assert "INSPECTION_MAJOR_DEFECT" in data["reason_codes"]
+    assert data["processing_status"] == "FRESH"
+    assert set(data["reason_codes"]) == {"INSPECTION_MAJOR_DEFECT", "UNMAPPED_ALERT_CODE", "OPEN_WORK_ORDER", "RECOVERING"}
+    assert data["latest_relevant_event_time"].startswith("2026-04-18T08:41:00")
 
 
 # ===========================================================================
@@ -389,6 +453,153 @@ def test_revision_supersedes_signals_and_triggers_recompute():
             session.query(Job).delete()
             session.query(NormalizedSignal).filter(NormalizedSignal.source_record_id.like("PF-REV-%")).delete()
             session.query(RawRecord).filter(RawRecord.record_id.like("PF-REV-%")).delete()
+            session.commit()
+            recompute_machine_state("EQ-003", session)
+            session.close()
+
+
+def test_closed_reason_code_vocabulary_enforced():
+    """Verify that every machine operational view only emits reason codes in the closed enum."""
+    allowed_codes = {rc.value for rc in ReasonCode}
+    prohibited_codes = {
+        "HIGH_CRITICALITY_ASSET",
+        "TEMP_ABOVE_RATED_LIMIT",
+        "VIBRATION_APPROACHING_LIMIT",
+        "MALFORMED_PAYLOAD_SKIPPED",
+        "NOMINAL_OPERATION",
+    }
+
+    resp = client.get("/v1/machines/status?page_size=50", headers=READ_HEADERS)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 8
+
+    all_observed_codes: set[str] = set()
+    for item in data["items"]:
+        codes = set(item["reason_codes"])
+        # All emitted codes must be in the closed enum
+        assert codes.issubset(
+            allowed_codes
+        ), f"Machine {item['machine_id']} emitted invalid codes: {codes - allowed_codes}"
+        # None of the prohibited codes can be present
+        assert codes.isdisjoint(
+            prohibited_codes
+        ), f"Machine {item['machine_id']} emitted prohibited codes: {codes & prohibited_codes}"
+        all_observed_codes.update(codes)
+
+    assert len(all_observed_codes) > 0
+
+
+def test_time_travel_as_of_semantics():
+    """Verify as_of recomputes purely in memory, echoes as_of, and does not alter database."""
+    from app.db.base import get_db_session
+    from app.db.models import MachineStateView
+
+    session = next(get_db_session())
+    try:
+        db_view_before = session.get(MachineStateView, "EQ-001")
+        assert db_view_before is not None
+        version_before = db_view_before.state_version
+
+        # 1. As of 08:00:00Z (before recovery at 08:32:05Z, active vibration alerts)
+        resp_08 = client.get(
+            "/v1/machines/EQ-001/status?as_of=2026-04-18T08:00:00Z",
+            headers=READ_HEADERS,
+        )
+        assert resp_08.status_code == 200
+        data_08 = resp_08.json()
+        assert data_08["as_of"] == "2026-04-18T08:00:00Z"
+        assert data_08["derived_status"] == "CRITICAL"
+
+        # 2. As of 09:00:00Z (after recovery at 08:32:05Z)
+        resp_09 = client.get(
+            "/v1/machines/EQ-001/status?as_of=2026-04-18T09:00:00Z",
+            headers=READ_HEADERS,
+        )
+        assert resp_09.status_code == 200
+        data_09 = resp_09.json()
+        assert data_09["as_of"] == "2026-04-18T09:00:00Z"
+        assert data_09["derived_status"] == "WATCH"
+
+        # 3. Verify they gave different results
+        assert data_08["derived_status"] != data_09["derived_status"]
+
+        # 4. Verify no write to database
+        session.expire_all()
+        db_view_after = session.get(MachineStateView, "EQ-001")
+        assert db_view_after is not None
+        assert db_view_after.state_version == version_before
+    finally:
+        session.close()
+
+
+def test_recompute_increments_version_and_updates_timestamps():
+    """Verify that a new ingest produces recompute jobs, increments state_version, and updates timestamps."""
+    import uuid
+
+    from app.core.clock import frozen_time
+    from app.db.base import get_db_session
+    from app.db.models import Job, MachineStateView, NormalizedSignal, RawRecord
+    from app.domain.engine import recompute_machine_state
+    from app.workers.handlers import DEFAULT_JOB_HANDLERS
+    from app.workers.queue import drain_queue
+
+    test_event_id = f"PF-RECOMP-{uuid.uuid4().hex[:8]}"
+    test_now = "2026-04-18T09:30:00Z"
+
+    with frozen_time(test_now) as test_clock:
+        session = next(get_db_session())
+        try:
+            # Baseline state_version
+            view_before = session.get(MachineStateView, "EQ-003")
+            assert view_before is not None
+            initial_version = view_before.state_version
+
+            # Ingest new signal using real PulseForge type RECOVERY_SIGNAL
+            envelope = {
+                "vendor": "PulseForge",
+                "plant_id": "PLANT_01",
+                "events": [
+                    {
+                        "event_id": test_event_id,
+                        "machine_id": "EQ-003",
+                        "line_id": "LINE-B",
+                        "event_time": "2026-04-18T09:15:00Z",
+                        "event_type": "RECOVERY_SIGNAL",
+                        "severity": "info",
+                        "temperature_c": 52.0,
+                    }
+                ],
+            }
+            res = client.post("/v1/ingest/pulseforge", json=envelope, headers=INGEST_HEADERS)
+            assert res.status_code == 202
+            assert res.json()["accepted"] == 1
+
+            # Assert NORMALIZE job exists in queue
+            job = (
+                session.query(Job)
+                .filter(Job.type == "NORMALIZE_PAYLOAD", Job.status == "PENDING")
+                .first()
+            )
+            assert job is not None
+
+            # Drain queue (processes NORMALIZE -> produces RECOMPUTE -> processes RECOMPUTE)
+            drained = drain_queue(session, DEFAULT_JOB_HANDLERS, clock=test_clock)
+            assert drained >= 2
+
+            # Assert state_version incremented and timestamps updated
+            session.expire_all()
+            view_after = session.get(MachineStateView, "EQ-003")
+            assert view_after is not None
+            assert view_after.state_version == initial_version + 1
+            assert view_after.last_processed_at is not None
+            assert view_after.last_processed_at.isoformat().startswith("2026-04-18T09:30:00")
+            assert view_after.latest_relevant_event_time is not None
+            assert view_after.latest_relevant_event_time.isoformat().startswith("2026-04-18T09:15:00")
+        finally:
+            session.query(Job).delete()
+            session.query(NormalizedSignal).filter(NormalizedSignal.source_record_id.like("PF-RECOMP-%")).delete()
+            session.query(RawRecord).filter(RawRecord.record_id.like("PF-RECOMP-%")).delete()
             session.commit()
             recompute_machine_state("EQ-003", session)
             session.close()
