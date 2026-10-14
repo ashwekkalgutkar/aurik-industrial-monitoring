@@ -48,6 +48,11 @@ no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = "-ra -q"
