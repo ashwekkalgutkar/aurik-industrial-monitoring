@@ -98,6 +98,7 @@ This document specifies the deterministic, explainable rules used by the operati
 - If `machine.criticality == "high"` and the maximum base attention calculated from active alerts is `>= 2`:
   - Attention level is escalated by `+1` (capped at maximum attention 4).
   - Machines with only attention 1 (e.g., minor observations or sensor degradation) are **not** escalated, avoiding alert fatigue on high-criticality assets.
+  - Recorded in the `explanation` list only when actually applied (`reason_code: null`, attention contribution: 1). It is **never** emitted as a reason code.
 
 ---
 
@@ -123,7 +124,7 @@ This document specifies the deterministic, explainable rules used by the operati
 | `RESOLVED_BY_MAINTENANCE`| 0 | N/A | N/A | Informational marker indicating alert resolved by service. |
 | `VENDOR_CONFLICT` | 1 | No | No | Conflicting vendor reports within 5-minute window. |
 | `MACHINE_IN_MAINTENANCE` | 0 | N/A | N/A | Equipment is actively undergoing service. |
-| `NO_RECENT_DATA` | 1 | No | No | No telemetry received within freshness window (24h). |
+| `NO_RECENT_DATA` | 1 | No | No | No telemetry received within freshness window (30m). |
 
 ---
 
@@ -131,7 +132,7 @@ This document specifies the deterministic, explainable rules used by the operati
 
 | Processing Status | Condition |
 |---|---|
-| `FAILED` | Any unhandled queue job for this machine has reached dead-letter status (`failed` after retries exhausted). |
-| `PARTIAL` | The machine has raw records that could not be fully parsed (`processing_state = PARSE_ERROR`), or had malformed fields skipped during ingestion. |
-| `STALE` | No effective telemetry signals have an `event_time` within the freshness window (`FRESHNESS_MINUTES = 1440` / 24 hours). |
+| `FAILED` | Any unhandled queue job for this machine has reached dead-letter status (`DEAD`). |
+| `PARTIAL` | The machine has raw records that could not be fully parsed or validated (`REJECTED_INVALID`), or had malformed fields skipped during ingestion. |
+| `STALE` | No effective telemetry signals have an `event_time` within the freshness window (`FRESHNESS_MINUTES = 30`). |
 | `FRESH` | Telemetry is recent, valid, and all associated ingest jobs processed without errors. |

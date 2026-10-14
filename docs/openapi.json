@@ -1255,6 +1255,74 @@
         "title": "BatchDetailRecordItem",
         "description": "Raw record item within an ingestion batch."
       },
+      "ContributingReasonExplanation": {
+        "properties": {
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code",
+            "description": "Reason code from closed enum (None if criticality escalation)"
+          },
+          "attention_contribution": {
+            "type": "integer",
+            "title": "Attention Contribution",
+            "description": "Attention level contribution (0 to 4)"
+          },
+          "rule_applied": {
+            "type": "string",
+            "title": "Rule Applied",
+            "description": "Deterministic rule or threshold logic applied"
+          },
+          "observed_value": {
+            "title": "Observed Value",
+            "description": "Observed measurement, status, note, or asset criticality"
+          },
+          "threshold_applied": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold Applied",
+            "description": "Threshold or boundary value applied, if applicable"
+          },
+          "signal_refs": {
+            "items": {
+              "$ref": "#/components/schemas/SourceEventRef"
+            },
+            "type": "array",
+            "title": "Signal Refs",
+            "description": "Source event references contributing to this reason"
+          },
+          "contributing_signal_refs": {
+            "items": {
+              "$ref": "#/components/schemas/SourceEventRef"
+            },
+            "type": "array",
+            "title": "Contributing Signal Refs",
+            "description": "Contributing signal references"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attention_contribution",
+          "rule_applied"
+        ],
+        "title": "ContributingReasonExplanation",
+        "description": "Detailed trace item explaining a status decision per reason code."
+      },
       "GlobalSummaryResponse": {
         "properties": {
           "total_machines": {
@@ -1657,12 +1725,11 @@
           },
           "explanation": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/ContributingReasonExplanation"
             },
             "type": "array",
             "title": "Explanation",
-            "description": "Detailed trace explaining each contributing factor"
+            "description": "Detailed trace explaining each contributing factor per reason code"
           },
           "latest_relevant_event_time": {
             "anyOf": [
@@ -1690,8 +1757,7 @@
           },
           "source_event_refs": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/SourceEventRef"
             },
             "type": "array",
             "title": "Source Event Refs",
@@ -1701,6 +1767,19 @@
             "type": "string",
             "title": "Rules Version",
             "description": "Semantic version of the rules engine used for computation"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of",
+            "description": "Point in time used for evaluation"
           }
         },
         "type": "object",
@@ -1745,6 +1824,19 @@
             "type": "array",
             "title": "Items",
             "description": "Page records ordered by attention desc, machine_id asc"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of",
+            "description": "Point in time used for evaluation"
           }
         },
         "type": "object",
@@ -1951,6 +2043,55 @@
         ],
         "title": "RecordIngestResult",
         "description": "Status summary for a single record within an ingestion batch."
+      },
+      "SourceEventRef": {
+        "properties": {
+          "vendor": {
+            "type": "string",
+            "title": "Vendor",
+            "description": "Vendor name: PulseForge | ThermexWatch | MaintaFlow | CMMS"
+          },
+          "record_id": {
+            "type": "string",
+            "title": "Record Id",
+            "description": "Vendor-assigned record or event identifier"
+          },
+          "raw_record_id": {
+            "type": "string",
+            "title": "Raw Record Id",
+            "description": "UUID of the ingested raw record in database"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "description": "Role played by this signal in state evaluation (e.g. alert, recovery, resolution, inspection, work_order)"
+          },
+          "event_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Time",
+            "description": "Timestamp of the event in UTC"
+          }
+        },
+        "type": "object",
+        "required": [
+          "vendor",
+          "record_id",
+          "raw_record_id",
+          "role"
+        ],
+        "title": "SourceEventRef",
+        "description": "Reference to an ingested source vendor event contributing to state."
       },
       "ValidationError": {
         "properties": {

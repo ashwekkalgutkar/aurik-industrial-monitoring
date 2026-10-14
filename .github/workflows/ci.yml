@@ -29,7 +29,7 @@ jobs:
         run: ruff check .
 
       - name: Run Mypy Static Type Checker
-        run: mypy app/ tests/
+        run: mypy app/ tests/ scripts/
 
   test:
     name: Integration & Unit Tests
@@ -75,7 +75,7 @@ jobs:
         run: pytest -v
 
   docker-build:
-    name: Docker Multi-Stage Build
+    name: Docker Multi-Stage Build & Dependency Audit
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -90,7 +90,20 @@ jobs:
           context: .
           target: runner
           push: false
+          load: true
           tags: aurik-api:latest
+
+      - name: Verify No Development Dependencies in Runtime Image
+        run: |
+          docker run --rm aurik-api:latest pip list > runtime_pip_list.txt
+          cat runtime_pip_list.txt
+          for pkg in pytest ruff mypy httpx; do
+            if grep -qi "^$pkg " runtime_pip_list.txt; then
+              echo "Error: Development dependency '$pkg' found in production runtime image!"
+              exit 1
+            fi
+          done
+          echo "Verified: runtime image contains zero development dependencies."
 
       - name: Build Test Image
         uses: docker/build-push-action@v5
@@ -99,3 +112,36 @@ jobs:
           target: test
           push: false
           tags: aurik-api:test
+
+  docker-compose-smoke:
+    name: Docker Compose Smoke & Anchor Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Copy Environment Configuration
+        run: |
+          cp .env.example .env
+          sed -i 's/CHANGE_ME_INGEST_KEY_PROD_MIN_24_CHARS/aurik-ingest-secret-key-prod-001/g' .env
+          sed -i 's/CHANGE_ME_READ_KEY_PROD_MIN_24_CHARS/aurik-read-secret-key-prod-002/g' .env
+          sed -i 's/CHANGE_ME_ADMIN_KEY_PROD_MIN_24_CHARS/aurik-admin-secret-key-prod-003/g' .env
+
+      - name: Start Services with Docker Compose
+        run: docker compose up -d --build --wait
+
+      - name: Verify Health and Readiness Endpoints
+        run: |
+          curl -sf http://localhost:8000/healthz | grep -q '"status":"ok"'
+          curl -sf http://localhost:8000/readyz | grep -q '"status":"ready"'
+          echo "Health and Readiness endpoints verified."
+
+      - name: Seed Database
+        run: docker compose exec -T api python -m app.cli seed
+
+      - name: Run Independent Anchor Verification
+        run: docker compose exec -T api python scripts/verify_anchors.py
+
+      - name: Tear Down Docker Compose
+        if: always()
+        run: docker compose down -v

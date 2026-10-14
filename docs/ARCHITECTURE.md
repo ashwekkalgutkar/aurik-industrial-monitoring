@@ -273,9 +273,7 @@ erDiagram
 ### 1. Multi-Stage Non-Root Docker Architecture
 - **Builder Stage**: Installs `uv` and compiles runtime wheel packages into a virtual environment (`/opt/venv`).
 - **Runtime Stage**: Based on `python:3.12-slim`. Contains **no compilers**, no dev tools (no pytest, ruff, mypy), and no tests directory.
-- **Unprivileged User**: Runs as `appuser:10001` with explicit ownership of application directories.
-- **Signals & Shutdown**: Container uses exec-form `CMD ["uvicorn", "app.main:app", ...]` ensuring `SIGTERM` signals directly reach the process for graceful drain.
-- **Image Size**: Reduced from ~1.2GB (full dev/build environment) to ~175MB runtime container footprint.
+- **Dependency Isolation**: Multi-stage virtualenv copy ensures development dependencies (linters, test frameworks) are excluded from the runtime container.
 
 ### 2. Database Migration Coordination & Startup Races
 To prevent race conditions when multiple API or worker replicas boot simultaneously:

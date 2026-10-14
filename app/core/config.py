@@ -204,13 +204,18 @@ class Settings(BaseSettings):
                     raise ValueError(
                         f"Production configuration error: {name} must be at least 24 characters long."
                     )
-                if clean_val.lower() in KNOWN_INSECURE_KEYS:
+                if (
+                    clean_val.lower() in KNOWN_INSECURE_KEYS
+                    or clean_val.lower().startswith("change_me")
+                    or clean_val.lower().startswith("changeme")
+                    or clean_val.lower().startswith("placeholder")
+                ):
                     logger.error(
-                        "Production startup refused: %s uses an insecure default/example value.",
+                        "Production startup refused: %s uses an insecure default/example/placeholder value.",
                         name,
                     )
                     raise ValueError(
-                        f"Production configuration error: {name} cannot equal known example/default keys."
+                        f"Production configuration error: {name} cannot equal known example/default keys or placeholders."
                     )
         return self
 
