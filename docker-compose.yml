@@ -110,7 +110,11 @@ services:
     command: ["python", "-m", "app.workers.runner"]
     restart: unless-stopped
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)'"]
+      interval: 3s
+      timeout: 3s
+      retries: 3
+      start_period: 2s
 
   seed:
     build:
