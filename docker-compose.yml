@@ -35,6 +35,8 @@ services:
       API_KEY_ADMIN: ${API_KEY_ADMIN:-aurik-admin-secret-key-prod-003}
     command: ["alembic", "upgrade", "head"]
     restart: "no"
+    healthcheck:
+      disable: true
 
   api:
     build:
@@ -107,6 +109,8 @@ services:
       DEFAULT_ASSUMED_TIMEZONE: ${DEFAULT_ASSUMED_TIMEZONE:-UTC}
     command: ["python", "-m", "app.workers.runner"]
     restart: unless-stopped
+    healthcheck:
+      disable: true
 
   seed:
     build:
@@ -130,6 +134,8 @@ services:
       API_KEY_ADMIN: ${API_KEY_ADMIN:-aurik-admin-secret-key-prod-003}
     command: ["python", "-m", "app.cli", "seed"]
     restart: "no"
+    healthcheck:
+      disable: true
 
 volumes:
   postgres_data:
