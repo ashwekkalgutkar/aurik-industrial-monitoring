@@ -1,0 +1,486 @@
+{
+  "info": {
+    "name": "Aurik Industrial Equipment Monitoring API",
+    "description": "Comprehensive Postman collection for the Aurik Tech Lead Assessment backend API.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "ingestKey",
+      "value": "aurik-ingest-secret-key-prod-01",
+      "type": "string"
+    },
+    {
+      "key": "readKey",
+      "value": "aurik-read-secret-key-prod-03",
+      "type": "string"
+    },
+    {
+      "key": "adminKey",
+      "value": "aurik-admin-secret-key-prod-02",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Probes",
+      "item": [
+        {
+          "name": "Liveness Probe (GET /healthz)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/healthz",
+              "host": ["{{baseUrl}}"],
+              "path": ["healthz"]
+            }
+          }
+        },
+        {
+          "name": "Readiness Probe (GET /readyz)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/readyz",
+              "host": ["{{baseUrl}}"],
+              "path": ["readyz"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ingestion Endpoints",
+      "item": [
+        {
+          "name": "Ingest PulseForge Events",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{ingestKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"vendor\": \"PulseForge\",\n  \"plant_id\": \"PLANT_01\",\n  \"events\": [\n    {\n      \"event_id\": \"PF-1001\",\n      \"machine_id\": \"EQ-001\",\n      \"line_id\": \"LINE-A\",\n      \"event_time\": \"2026-04-18T07:59:12Z\",\n      \"event_type\": \"HIGH_VIBRATION\",\n      \"severity\": \"high\",\n      \"vibration_mm_s\": 11.8,\n      \"temperature_c\": 83.2,\n      \"machine_state\": \"running\",\n      \"sensor_health\": 0.91,\n      \"vendor_confidence\": 0.87\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/ingest/pulseforge",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "ingest", "pulseforge"]
+            }
+          }
+        },
+        {
+          "name": "Ingest ThermexWatch Readings",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{ingestKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"ThermexWatch\",\n  \"site_code\": \"PLANT_01\",\n  \"readings\": [\n    {\n      \"readingId\": \"TW-8801\",\n      \"assetCode\": \"EQ-001\",\n      \"productionLine\": \"A\",\n      \"timestampMs\": 1776499152000,\n      \"alertCode\": \"VIB_WARN\",\n      \"level\": 4,\n      \"vibration_g\": 0.81,\n      \"temperature_f\": 181.2,\n      \"power_kw\": 37.8,\n      \"is_active\": true,\n      \"signal_quality\": \"GOOD\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/ingest/thermexwatch",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "ingest", "thermexwatch"]
+            }
+          }
+        },
+        {
+          "name": "Ingest MaintaFlow Records",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{ingestKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider_name\": \"MaintaFlow\",\n  \"factory_id\": \"PLANT_01\",\n  \"records\": [\n    {\n      \"record_id\": \"MF-501\",\n      \"machine_ref\": \"EQ-001\",\n      \"line_ref\": \"LINE-A\",\n      \"recorded_at\": \"2026/04/18 08:14:05\",\n      \"record_type\": \"inspection\",\n      \"inspection_result\": \"minor_defect_found\",\n      \"maintenance_status\": \"not_due\",\n      \"days_since_last_service\": 18,\n      \"technician_note\": \"Belt wear visible; machine still operational\",\n      \"manual_confidence\": \"medium\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/ingest/maintaflow",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "ingest", "maintaflow"]
+            }
+          }
+        },
+        {
+          "name": "Ingest Work Orders",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{ingestKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"CMMS\",\n  \"plant_id\": \"PLANT_01\",\n  \"work_orders\": [\n    {\n      \"work_order_id\": \"WO-1002\",\n      \"machine_id\": \"EQ-004\",\n      \"line_id\": \"LINE-C\",\n      \"opened_at\": \"2026-04-18T07:35:00Z\",\n      \"closed_at\": \"2026-04-18T08:10:00Z\",\n      \"maintenance_type\": \"power_check\",\n      \"trigger_source\": \"operator_report\",\n      \"status\": \"closed\",\n      \"downtime_minutes\": 22,\n      \"post_maintenance_check\": \"passed\",\n      \"notes\": \"Power drop investigated and cleared\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/ingest/work-orders",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "ingest", "work-orders"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Operational Status",
+      "item": [
+        {
+          "name": "List Machines Status (Default Sort: Urgency Desc)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{readKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/machines/status?page=1&page_size=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "machines", "status"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "page_size",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Machines Status (Filter Needs Attention)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{readKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/machines/status?needs_attention=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "machines", "status"],
+              "query": [
+                {
+                  "key": "needs_attention",
+                  "value": "true"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Machine Status (EQ-001 WATCH)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{readKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/machines/EQ-001/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "machines", "EQ-001", "status"]
+            }
+          }
+        },
+        {
+          "name": "Get Machine Status (EQ-002 CRITICAL)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{readKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/machines/EQ-002/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "machines", "EQ-002", "status"]
+            }
+          }
+        },
+        {
+          "name": "Get Machine Status (EQ-006 WATCH Sensor Degraded)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{readKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/machines/EQ-006/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "machines", "EQ-006", "status"]
+            }
+          }
+        },
+        {
+          "name": "Time-Travel Machine Status (EQ-001 as_of)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{readKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/machines/EQ-001/status?as_of=2026-04-18T07:59:30Z",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "machines", "EQ-001", "status"],
+              "query": [
+                {
+                  "key": "as_of",
+                  "value": "2026-04-18T07:59:30Z"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Plant & Line Summaries",
+      "item": [
+        {
+          "name": "Global Operational Summary (GET /v1/summary)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{readKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/summary",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "summary"]
+            }
+          }
+        },
+        {
+          "name": "Plant Summary (PLANT_01)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{readKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/plants/PLANT_01/summary",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "plants", "PLANT_01", "summary"]
+            }
+          }
+        },
+        {
+          "name": "Plant Summary (PLANT_02)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{readKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/plants/PLANT_02/summary",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "plants", "PLANT_02", "summary"]
+            }
+          }
+        },
+        {
+          "name": "Line Summary (LINE-A)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{readKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lines/LINE-A/summary",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "lines", "LINE-A", "summary"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ingestion Audit & Lineage",
+      "item": [
+        {
+          "name": "Get Record Details & Generated Signals",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{readKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/ingestion/records/PulseForge/PF-1001",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "ingestion", "records", "PulseForge", "PF-1001"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin & Observability",
+      "item": [
+        {
+          "name": "List Queue Jobs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{adminKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/jobs?status=PENDING",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "jobs"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "PENDING"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Operational Metrics (JSON)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{adminKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/metrics",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "metrics"]
+            }
+          }
+        },
+        {
+          "name": "Prometheus Metrics (GET /metrics)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": ["{{baseUrl}}"],
+              "path": ["metrics"]
+            }
+          }
+        },
+        {
+          "name": "Trigger Machine Recompute",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{adminKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/machines/EQ-001/recompute",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "machines", "EQ-001", "recompute"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
