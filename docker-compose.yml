@@ -1,0 +1,84 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aurik_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: aurik_monitoring
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aurik_monitoring"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aurik_api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@postgres:5432/aurik_monitoring
+      API_KEY_INGEST: aurik-ingest-secret-key-prod-001
+      API_KEY_READ: aurik-read-secret-key-prod-002
+      API_KEY_ADMIN: aurik-admin-secret-key-prod-003
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+      MAX_PAYLOAD_BYTES: 5242880
+      ALERT_TTL_MINUTES: 120
+      FRESHNESS_MINUTES: 30
+      VENDOR_CONFLICT_WINDOW_MINUTES: 5
+      TEMP_NEAR_LIMIT_RATIO: 0.90
+      VIB_NEAR_LIMIT_RATIO: 0.85
+      SENSOR_QUALITY_MIN: 0.50
+      POWER_DEVIATION_PCT: 20.0
+      DEFAULT_ASSUMED_TIMEZONE: UTC
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "alembic upgrade head &&
+             python -m app.cli seed &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aurik_worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@postgres:5432/aurik_monitoring
+      API_KEY_INGEST: aurik-ingest-secret-key-prod-001
+      API_KEY_READ: aurik-read-secret-key-prod-002
+      API_KEY_ADMIN: aurik-admin-secret-key-prod-003
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+      JOB_LEASE_SECONDS: 60
+      JOB_MAX_ATTEMPTS: 3
+      WORKER_POLL_INTERVAL_SECONDS: 0.5
+      ALERT_TTL_MINUTES: 120
+      FRESHNESS_MINUTES: 30
+      VENDOR_CONFLICT_WINDOW_MINUTES: 5
+      TEMP_NEAR_LIMIT_RATIO: 0.90
+      VIB_NEAR_LIMIT_RATIO: 0.85
+      SENSOR_QUALITY_MIN: 0.50
+      POWER_DEVIATION_PCT: 20.0
+      DEFAULT_ASSUMED_TIMEZONE: UTC
+    command: python -m app.workers.runner
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
