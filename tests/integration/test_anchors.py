@@ -284,3 +284,113 @@ def test_property_shuffle_fixture_ingestion_order_produces_identical_state():
     finally:
         session.close()
 
+
+def test_revision_supersedes_signals_and_triggers_recompute():
+    """Verify that a revision supersedes the old signal (is_effective=False) and triggers recompute."""
+    import uuid
+
+    from app.core.clock import frozen_time
+    from app.db.base import get_db_session
+    from app.db.models import Job, NormalizedSignal, RawRecord
+    from app.domain.engine import recompute_machine_state
+    from app.workers.handlers import DEFAULT_JOB_HANDLERS
+    from app.workers.queue import drain_queue
+
+    test_event_id = f"PF-REV-{uuid.uuid4().hex[:8]}"
+    with frozen_time("2026-04-18T09:00:00Z") as test_clock:
+        session = next(get_db_session())
+        try:
+            # Clean up any residual test records and pending jobs from prior fixture tests
+            session.query(Job).delete()
+            session.query(NormalizedSignal).filter(NormalizedSignal.source_record_id.like("PF-REV-%")).delete()
+            session.query(RawRecord).filter(RawRecord.record_id.like("PF-REV-%")).delete()
+            session.commit()
+
+            # 1. Ingest initial record that triggers a critical alert (after prior recovery at 08:55:00Z)
+            init_envelope = {
+                "vendor": "PulseForge",
+                "plant_id": "PLANT_01",
+                "events": [
+                    {
+                        "event_id": test_event_id,
+                        "machine_id": "EQ-003",
+                        "line_id": "LINE-B",
+                        "event_time": "2026-04-18T08:58:00Z",
+                        "event_type": "TEMP_SPIKE",
+                        "severity": "critical",
+                        "temperature_c": 115.0,
+                    }
+                ],
+            }
+            res1 = client.post("/v1/ingest/pulseforge", json=init_envelope, headers=INGEST_HEADERS)
+            assert res1.status_code == 202
+            assert res1.json()["accepted"] == 1
+
+            drained1 = drain_queue(session, DEFAULT_JOB_HANDLERS, clock=test_clock)
+            assert drained1 >= 1
+
+            m_resp1 = client.get("/v1/machines/EQ-003/status", headers=READ_HEADERS)
+            assert m_resp1.status_code == 200
+            assert m_resp1.json()["derived_status"] == "CRITICAL"
+
+            session.commit()
+            old_sig = (
+                session.query(NormalizedSignal)
+                .filter_by(source_record_id=test_event_id, is_effective=True)
+                .first()
+            )
+            assert old_sig is not None
+
+            # 2. Ingest revision with same record_id but corrected recovery signal
+            rev_envelope = {
+                "vendor": "PulseForge",
+                "plant_id": "PLANT_01",
+                "events": [
+                    {
+                        "event_id": test_event_id,
+                        "machine_id": "EQ-003",
+                        "line_id": "LINE-B",
+                        "event_time": "2026-04-18T08:58:00Z",
+                        "event_type": "RECOVERY_SIGNAL",
+                        "severity": "info",
+                        "temperature_c": 55.0,
+                    }
+                ],
+            }
+            res2 = client.post("/v1/ingest/pulseforge", json=rev_envelope, headers=INGEST_HEADERS)
+            assert res2.status_code == 202
+            assert res2.json()["revision"] == 1
+            assert res2.json()["records"][0]["disposition"] == "REVISION"
+
+            drained2 = drain_queue(session, DEFAULT_JOB_HANDLERS, clock=test_clock)
+            assert drained2 >= 1
+
+            # 3. Check old signal is now superseded (is_effective=False) in fresh session
+            session.close()
+            session = next(get_db_session())
+            old_sig_refreshed = session.get(NormalizedSignal, old_sig.id)
+            assert old_sig_refreshed is not None
+            assert old_sig_refreshed.is_effective is False
+
+            # 4. Check new signal is effective and machine status recomputed to HEALTHY
+            new_sig = (
+                session.query(NormalizedSignal)
+                .filter_by(source_record_id=test_event_id, is_effective=True)
+                .first()
+            )
+            assert new_sig is not None
+            assert new_sig.id != old_sig.id
+
+            m_resp2 = client.get("/v1/machines/EQ-003/status", headers=READ_HEADERS)
+            assert m_resp2.status_code == 200
+            assert m_resp2.json()["derived_status"] == "HEALTHY"
+        finally:
+            # Cleanup test records and restore baseline state
+            session.query(Job).delete()
+            session.query(NormalizedSignal).filter(NormalizedSignal.source_record_id.like("PF-REV-%")).delete()
+            session.query(RawRecord).filter(RawRecord.record_id.like("PF-REV-%")).delete()
+            session.commit()
+            recompute_machine_state("EQ-003", session)
+            session.close()
+
+
