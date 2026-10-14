@@ -27,8 +27,8 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgrespassword@postgres:5432/aurik_monitoring}
-      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: ${COMPOSE_DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@postgres:5432/${POSTGRES_DB:-aurik_monitoring}}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       API_KEY_INGEST: ${API_KEY_INGEST:-aurik-ingest-secret-key-prod-001}
       API_KEY_READ: ${API_KEY_READ:-aurik-read-secret-key-prod-002}
       API_KEY_ADMIN: ${API_KEY_ADMIN:-aurik-admin-secret-key-prod-003}
@@ -47,8 +47,8 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgrespassword@postgres:5432/aurik_monitoring}
-      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: ${COMPOSE_DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@postgres:5432/${POSTGRES_DB:-aurik_monitoring}}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       API_KEY_INGEST: ${API_KEY_INGEST:-aurik-ingest-secret-key-prod-001}
       API_KEY_READ: ${API_KEY_READ:-aurik-read-secret-key-prod-002}
       API_KEY_ADMIN: ${API_KEY_ADMIN:-aurik-admin-secret-key-prod-003}
@@ -85,8 +85,8 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgrespassword@postgres:5432/aurik_monitoring}
-      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: ${COMPOSE_DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@postgres:5432/${POSTGRES_DB:-aurik_monitoring}}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       API_KEY_INGEST: ${API_KEY_INGEST:-aurik-ingest-secret-key-prod-001}
       API_KEY_READ: ${API_KEY_READ:-aurik-read-secret-key-prod-002}
       API_KEY_ADMIN: ${API_KEY_ADMIN:-aurik-admin-secret-key-prod-003}
@@ -119,8 +119,8 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgrespassword@postgres:5432/aurik_monitoring}
-      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: ${COMPOSE_DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@postgres:5432/${POSTGRES_DB:-aurik_monitoring}}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       API_KEY_INGEST: ${API_KEY_INGEST:-aurik-ingest-secret-key-prod-001}
       API_KEY_READ: ${API_KEY_READ:-aurik-read-secret-key-prod-002}
       API_KEY_ADMIN: ${API_KEY_ADMIN:-aurik-admin-secret-key-prod-003}

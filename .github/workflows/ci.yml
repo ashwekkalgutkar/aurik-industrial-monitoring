@@ -130,6 +130,10 @@ jobs:
       - name: Start Services with Docker Compose
         run: docker compose up -d --build --wait
 
+      - name: Dump Compose Logs on Failure
+        if: failure()
+        run: docker compose logs
+
       - name: Verify Health and Readiness Endpoints
         run: |
           curl -sf http://localhost:8000/healthz | grep -q '"status":"ok"'
