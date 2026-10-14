@@ -167,9 +167,7 @@ def seed_database(
             .all()
         )
         for v in views:
-            reasons_str = ", ".join(v.reason_codes[:3])
-            if len(v.reason_codes) > 3:
-                reasons_str += f" (+{len(v.reason_codes) - 3} more)"
+            reasons_str = ", ".join(v.reason_codes) if v.reason_codes else "None"
             print(
                 f"{v.machine_id:<12} | {v.plant_id:<10} | {v.line_id:<8} | "
                 f"{v.derived_status:<18} | {v.attention_level:<4} | {str(v.needs_attention):<8} | "

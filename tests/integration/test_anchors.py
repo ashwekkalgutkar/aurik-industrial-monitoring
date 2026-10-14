@@ -234,3 +234,53 @@ def test_all_vendor_fixtures_parse_and_persist(fixture_path: Path):
                 elif "records" in sub:
                     res = client.post("/v1/ingest/maintaflow", json=sub, headers=INGEST_HEADERS)
                     assert res.status_code in (202, 422)
+
+
+def test_csv_and_json_overlap_produces_duplicate_no_ops():
+    """Verify that records in CSV seed that also appear in JSON samples are detected as DUPLICATE."""
+    import json
+    sample_path = SAMPLES_DIR / "pulseforge_sample.json"
+    with sample_path.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+    resp = client.post("/v1/ingest/pulseforge", json=payload, headers=INGEST_HEADERS)
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["duplicate"] == 2
+    assert data["accepted"] == 0
+    for rec in data["records"]:
+        assert rec["disposition"] == "DUPLICATE"
+
+
+def test_property_shuffle_fixture_ingestion_order_produces_identical_state():
+    """Property test: shuffling signal arrival order 5 times yields identical machine operational views."""
+    import random
+
+    from app.db.base import get_db_session
+    from app.db.models import Machine, NormalizedSignal
+    from app.domain.engine import evaluate_machine_state
+
+    session = next(get_db_session())
+    try:
+        machine = session.get(Machine, "EQ-001")
+        assert machine is not None
+        signals = (
+            session.query(NormalizedSignal)
+            .filter_by(machine_id="EQ-001", is_effective=True)
+            .all()
+        )
+        assert len(signals) >= 2
+
+        baseline = evaluate_machine_state(machine, signals, [], [], ANCHOR_TIME, settings)
+
+        rng = random.Random(42)
+        for _ in range(5):
+            shuffled = list(signals)
+            rng.shuffle(shuffled)
+            result = evaluate_machine_state(machine, shuffled, [], [], ANCHOR_TIME, settings)
+            assert result.derived_status == baseline.derived_status
+            assert result.attention_level == baseline.attention_level
+            assert result.reason_codes == baseline.reason_codes
+            assert result.needs_attention == baseline.needs_attention
+    finally:
+        session.close()
+
