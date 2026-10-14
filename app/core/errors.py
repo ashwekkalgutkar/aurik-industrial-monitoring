@@ -19,14 +19,15 @@ class AppError(Exception):
         self.status_code = status_code
         self.details = details or {}
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, request_id: str | None = None) -> dict[str, Any]:
         """Format the exception into the canonical API error envelope."""
         return {
             "error": {
                 "code": self.code,
                 "message": self.message,
                 "details": self.details,
-            }
+            },
+            "request_id": request_id,
         }
 
 

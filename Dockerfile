@@ -49,10 +49,11 @@ COPY --from=builder /install /usr/local
 RUN groupadd -g 10001 aurik && \
     useradd -u 10001 -g aurik -s /bin/bash -m aurik
 
-# Copy application source code and migrations
+# Copy application source code, migrations, and scripts
 COPY app/ ./app/
 COPY alembic.ini .
-COPY alembic/ ./alembic/
+COPY migrations/ ./migrations/
+COPY scripts/ ./scripts/
 
 # Note: The CLI seed command reads reference metadata, historical data, and vendor samples
 # directly from fixtures/ to populate the database.

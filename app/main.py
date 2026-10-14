@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import Response
@@ -87,14 +88,10 @@ app.add_middleware(RequestContextMiddleware)
 @app.exception_handler(AppError)
 async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
     """Format known application and domain exceptions into canonical error envelope."""
-    payload = exc.to_dict()
-    # Ensure request_id is present in error details for traceability
     req_id = request_id_ctx_var.get()
-    if req_id and "request_id" not in payload.get("error", {}):
-        payload["error"]["request_id"] = req_id
     return JSONResponse(
         status_code=exc.status_code,
-        content=payload,
+        content=exc.to_dict(request_id=req_id),
     )
 
 
@@ -109,10 +106,37 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
                 "code": "VALIDATION_ERROR",
                 "message": "Request payload failed schema validation.",
                 "details": exc.errors(),
-                "request_id": req_id,
-            }
+            },
+            "request_id": req_id,
         },
     )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def handle_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """Format Starlette HTTP exceptions (e.g. 404 routing, 405 method) into canonical error envelope."""
+    req_id = request_id_ctx_var.get()
+    code_map = {
+        401: "UNAUTHENTICATED",
+        403: "FORBIDDEN",
+        404: "NOT_FOUND",
+        405: "METHOD_NOT_ALLOWED",
+        413: "PAYLOAD_TOO_LARGE",
+        422: "VALIDATION_ERROR",
+    }
+    code = code_map.get(exc.status_code, "HTTP_ERROR")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {
+                "code": code,
+                "message": str(exc.detail) if exc.detail else "HTTP error.",
+                "details": {},
+            },
+            "request_id": req_id,
+        },
+    )
+
 
 
 @app.exception_handler(Exception)
@@ -126,8 +150,9 @@ async def handle_generic_exception(request: Request, exc: Exception) -> JSONResp
             "error": {
                 "code": "INTERNAL_SERVER_ERROR",
                 "message": "An unexpected server error occurred.",
-                "request_id": req_id,
-            }
+                "details": {},
+            },
+            "request_id": req_id,
         },
     )
 
