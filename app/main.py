@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
-from app.api.routers import admin, ingest
+from app.api.routers import admin, ingest, read
 from app.core.config import get_settings
 from app.core.errors import AppError, PayloadTooLargeError
 from app.core.logging import request_id_ctx_var, setup_logging
@@ -104,3 +104,4 @@ async def handle_generic_exception(request: Request, exc: Exception) -> JSONResp
 # ---------------------------------------------------------------------------
 app.include_router(ingest.router)
 app.include_router(admin.router)
+app.include_router(read.router)
